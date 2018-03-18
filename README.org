@@ -1,0 +1,132 @@
+* scheme-to-c - A quest to write a Scheme->C compiler
+
+This is an experiment in compiling Scheme to C.
+
+The current grammar that can be compiled is:
+
+#+BEGIN_SRC xml
+<expr> := #t
+          #f
+          (-)<number>
+          <sym>
+          (eq? <expr> <expr>)
+          (boolean? <expr>)
+          (fixnum? <expr>)
+          (char? <expr>)
+          (add1 <expr>)
+          (sub1 <expr>)
+          (zero? <expr>)
+          (define <sym> <expr>)
+          (let ((<sym> <expr>) ...)
+            <body>)
+          (car <expr>)
+          (cdr <expr>)
+          (cons <expr> <expr>)
+          (quote <expr>)
+          (cond (<expr> <expr>) ...)
+          (begin <expr> ...)
+          (+ <expr> <expr>)
+          (- <expr> <expr>)
+          (* <expr> <expr>)
+          (if <expr> <expr> <expr>)
+#+END_SRC
+
+** Example use
+
+#+BEGIN_SRC scheme
+(emit-program
+ '(cond ((eq? (cond ((eq? 8 (* 4 2))
+                     (let ((a 3) (b 1000))
+                       (* a b)))) 3000) 9999) ((eq? #t #t) -1)))
+#+END_SRC
+
+** Output
+
+#+BEGIN_SRC c
+// skipping ~ 200 lines of helper functions
+int main(int argc, char const *argv[])
+{
+eax.t = FIXNUM;
+eax.n = 8;
+push();
+eax.t = FIXNUM;
+eax.n = 4;
+push();
+eax.t = FIXNUM;
+eax.n = 2;
+al = eax.n;
+pop();
+eax.n *= al;
+cmp();
+if (!eax.b){goto label6;};
+{
+eax.t = FIXNUM;
+eax.n = 3;
+reg a = eax;
+eax.t = FIXNUM;
+eax.n = 1000;
+reg b = eax;
+eax = a;
+push();
+eax = b;
+al = eax.n;
+pop();
+eax.n *= al;
+}
+goto label4;
+label6:;
+label4:;
+push();
+eax.t = FIXNUM;
+eax.n = 3000;
+cmp();
+if (!eax.b){goto label3;};
+eax.t = FIXNUM;
+eax.n = 9999;
+goto label1;
+label3:;
+eax.t = BOOLEAN;
+eax.b = 1;
+push();
+eax.t = BOOLEAN;
+eax.b = 1;
+cmp();
+if (!eax.b){goto label8;};
+eax.t = FIXNUM;
+eax.n = -1;
+goto label1;
+label8:;
+label1:;
+printf("Value of eax: ");
+print(eax);
+puts("");
+}
+#+END_SRC
+
+Running the code results in:
+
+#+BEGIN_SRC
+Value of eax: 9999
+#+END_SRC
+
+** Project Goals
+
+- [ ] Implement IO
+- [ ] Implement closures (i.e. =lambda=)
+  - [ ] Implement frames, environment
+- [ ] Implement define (in the sense of functions)
+- [ ] Implement strings, vectors and their respective operations
+- [ ] Be self-hosting
+
+** Futamura Projections
+
+Program /a/ := Scheme -> C, written in Scheme
+Program /b/ := (a a) yields a compiler, in this case a C program that
+               converts Scheme programs to C
+Program /c/ := (b b) yields b, a C program that converts Scheme
+               programs to C, here it ends up being a quine.
+
+Then, given an interpreter /x/ written in Scheme for a language (say,
+Brainfuck), performing (a x) yields a C interpreter for language /x/.
+
+Many more interesting semantic games to be played...
