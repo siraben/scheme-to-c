@@ -1,0 +1,64 @@
+int main(int argc, char const *argv[])
+{
+eax.t = FIXNUM;
+eax.n = 27;
+reg a = eax;
+foo:
+print((a));
+puts("");
+eax.t = FIXNUM;
+eax.n = 1;
+push();
+eax = a;
+cmp();
+if (!eax.b){goto label2;};
+goto end;
+goto label1;
+label2:;
+eax.t = FIXNUM;
+eax.n = 1;
+push();
+eax = a;
+push();
+eax.t = FIXNUM;
+eax.n = 2;
+al = eax.n;
+pop();
+eax.n %= al;
+cmp();
+if (!eax.b){goto label4;};
+eax.t = FIXNUM;
+eax.n = 3;
+push();
+eax = a;
+al = eax.n;
+pop();
+eax.n *= al;
+push();
+eax.t = FIXNUM;
+eax.n = 1;
+al = eax.n;
+pop();
+eax.n += al;
+a = eax;
+goto foo;
+goto label3;
+label4:;
+eax = a;
+push();
+eax.t = FIXNUM;
+eax.n = 2;
+al = eax.n;
+pop();
+eax.n /= al;
+a = eax;
+goto foo;
+label3:;
+;
+label1:;
+;
+end:
+printf("Value of eax: ");
+print(eax);
+puts("");
+}

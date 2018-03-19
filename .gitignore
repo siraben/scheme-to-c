@@ -1,3 +1,4 @@
 *.o
 vm
 scheme-primitives
+example.c

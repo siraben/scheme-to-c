@@ -2,7 +2,7 @@
 CC = gcc
 
 # flags to pass compiler
-CFLAGS = -O2 -Wall -Wpedantic
+CFLAGS = -O2 -Wall
 
 # name for executable
 EXE = vm

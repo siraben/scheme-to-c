@@ -2,123 +2,129 @@
 #include <stdlib.h>
 #include <string.h>
 #define MAX_SYMBOL_LEN 32
-typedef enum type {FIXNUM, CHAR, BOOLEAN, NIL, PAIR, SYMBOL, STRING} type;
+typedef enum type {FIXNUM, CHAR, BOOLEAN, NIL, PAIR, SYMBOL, STRING, CLOSURE} type;
 typedef struct reg {
-    type t;
-    union {
-        long long n; 
-        char c;
-        char *s;
-        int b;
-        struct {
-            struct reg *car;
-            struct reg *cdr;
-        };
+  type t;
+  union {
+    long long n; 
+    char c;
+    char *s;
+    int b;
+    struct {
+      struct reg *car;
+      struct reg *cdr;
     };
+        // Closure
+    struct {
+      struct reg *vars;
+      struct reg *body;
+      struct reg *env;
+    };
+  };
 } reg;
 static int al;
 static reg eax, ebx;
 
 typedef struct llist {
-    reg curr;
-    struct llist *next;
+  reg curr;
+  struct llist *next;
 } llist;
 
 llist *stack = 0;
 
 // Push eax onto stack
 static inline void push() {
-    llist *head, *prev = stack;
-    head = malloc(sizeof(llist));
-    head->curr = eax;
-    head->next = prev;
-    stack = head;
+  llist *head, *prev = stack;
+  head = malloc(sizeof(llist));
+  head->curr = eax;
+  head->next = prev;
+  stack = head;
 }
 
 // Replace eax with top of stack
 static inline void pop() {
-    llist *tail = stack->next;
-    eax = stack->curr;
-    free(stack);
-    stack = tail;
+  llist *tail = stack->next;
+  eax = stack->curr;
+  free(stack);
+  stack = tail;
 }
 
 // Compare contents of eax with top of stack
 static inline void cmp() {
-    ebx = eax;
-    pop();
-    if (eax.t != ebx.t) {
+  ebx = eax;
+  pop();
+  if (eax.t != ebx.t) {
         // type mismatch
-        al = 0;
-    } else {
-        if (eax.t == BOOLEAN) {
-            al = (eax.b == ebx.b);
-        } else if (eax.t == FIXNUM) {
-            al = (eax.n == ebx.n);
-        } else if (eax.t == CHAR) {
-            al = (eax.c == ebx.c);
-        } else if (eax.t == NIL) {
-            al = (eax.t == ebx.t);
-        } else if (eax.t == SYMBOL) {
-            if (ebx.t == SYMBOL) {
-                al = (strncmp(eax.s, ebx.s, MAX_SYMBOL_LEN - 1) == 0);
-            }
-        }
+    al = 0;
+  } else {
+    if (eax.t == BOOLEAN) {
+      al = (eax.b == ebx.b);
+    } else if (eax.t == FIXNUM) {
+      al = (eax.n == ebx.n);
+    } else if (eax.t == CHAR) {
+      al = (eax.c == ebx.c);
+    } else if (eax.t == NIL) {
+      al = (eax.t == ebx.t);
+    } else if (eax.t == SYMBOL) {
+      if (ebx.t == SYMBOL) {
+        al = (strncmp(eax.s, ebx.s, MAX_SYMBOL_LEN - 1) == 0);
+      }
     }
-    eax.t = BOOLEAN;
-    eax.b = al;
+  }
+  eax.t = BOOLEAN;
+  eax.b = al;
 }
 
 reg *car(reg *head) {
   if(head->t == PAIR) {
     return head->car;
-}
-return 0;
+  }
+  return 0;
 }
 
 reg *cdr(reg *head) {
   if(head->t == PAIR) {
     return head->cdr;
-}
-return 0;
+  }
+  return 0;
 }
 
 static inline void print(reg r) {
-    if (r.t == BOOLEAN) {
-        printf("%s", r.b ? "#t" : "#f");
-    } else if (r.t == FIXNUM) {
-        printf("%lld", r.n);
-    } else if (r.t == CHAR) {
-        putchar(r.c);
-    } else if (r.t == NIL) {
-        printf("()");
-    } else if ( r.t == SYMBOL) {
-        printf("%s", r.s);
-    } else if ( r.t == STRING) {
-        printf("\"%s\"", r.s);
-    }
+  if (r.t == BOOLEAN) {
+    printf("%s", r.b ? "#t" : "#f");
+  } else if (r.t == FIXNUM) {
+    printf("%lld", r.n);
+  } else if (r.t == CHAR) {
+    putchar(r.c);
+  } else if (r.t == NIL) {
+    printf("()");
+  } else if ( r.t == SYMBOL) {
+    printf("%s", r.s);
+  } else if ( r.t == STRING) {
+    printf("\"%s\"", r.s);
+  }
 
-    if (r.t == PAIR) {
-        reg *head = calloc(1, sizeof(reg));
-        memcpy(head,&r,sizeof(reg));
-        printf("(");
-        print_pair:
+  if (r.t == PAIR) {
+    reg *head = calloc(1, sizeof(reg));
+    memcpy(head,&r,sizeof(reg));
+    printf("(");
+    print_pair:
 
-        print(*car(head));
-        if (cdr(head)->t != NIL) {
-          printf(" ");
-          head = cdr(head);
-          if (head->t != PAIR) {
-            printf(" . ");
-            print(*head);
-            printf(")");
-            free(head);
-            return;
-        }
-        goto print_pair;
+    print(*car(head));
+    if (cdr(head)->t != NIL) {
+      printf(" ");
+      head = cdr(head);
+      if (head->t != PAIR) {
+        printf(" . ");
+        print(*head);
+        printf(")");
+        free(head);
+        return;
+      }
+      goto print_pair;
     }
     printf(")");
-}
+  }
 }
 
 reg *cons(reg *a, reg *b) {
@@ -178,71 +184,82 @@ reg *make_string(char *name) {
   return res;
 }
 
-reg *false_obj, *true_obj, *null_obj;
+// Collatz program
+// (begin
+//      (define a 27)
+//      (label foo)
+//      (display a)
+//      (if (eq? 1 a)
+//          (goto end)
+//          (if (eq? 1 (remainder a 2))
+//              (begin
+//                (set! a (+ (* 3 a) 1))
+//                (goto foo))
+//              (begin
+//                (set! a (/ a 2))
+//                (goto foo))))
+//      (label end))
 
-void init_regs(void) {
-  false_obj = alloc_reg();
-  true_obj = alloc_reg();
-  null_obj = alloc_reg();
-  false_obj->t = BOOLEAN;
-  true_obj->t = BOOLEAN;
-  null_obj->t = NIL;
-  false_obj->b = 0;
-  true_obj->b = 1;
-}
 int main(int argc, char const *argv[])
 {
 eax.t = FIXNUM;
-eax.n = 8;
-push();
+eax.n = 27;
+reg a = eax;
+foo:
+print((a));
+puts("");
 eax.t = FIXNUM;
-eax.n = 4;
+eax.n = 1;
+push();
+eax = a;
+cmp();
+if (!eax.b){goto label2;};
+goto end;
+goto label1;
+label2:;
+eax.t = FIXNUM;
+eax.n = 1;
+push();
+eax = a;
 push();
 eax.t = FIXNUM;
 eax.n = 2;
 al = eax.n;
 pop();
-eax.n *= al;
+eax.n %= al;
 cmp();
-if (!eax.b){goto label6;};
-{
+if (!eax.b){goto label4;};
 eax.t = FIXNUM;
 eax.n = 3;
-reg a = eax;
-eax.t = FIXNUM;
-eax.n = 1000;
-reg b = eax;
-eax = a;
 push();
-eax = b;
+eax = a;
 al = eax.n;
 pop();
 eax.n *= al;
-}
-goto label4;
-label6:;
+push();
+eax.t = FIXNUM;
+eax.n = 1;
+al = eax.n;
+pop();
+eax.n += al;
+a = eax;
+goto foo;
+goto label3;
 label4:;
+eax = a;
 push();
 eax.t = FIXNUM;
-eax.n = 3000;
-cmp();
-if (!eax.b){goto label3;};
-eax.t = FIXNUM;
-eax.n = 9999;
-goto label1;
+eax.n = 2;
+al = eax.n;
+pop();
+eax.n /= al;
+a = eax;
+goto foo;
 label3:;
-eax.t = BOOLEAN;
-eax.b = 1;
-push();
-eax.t = BOOLEAN;
-eax.b = 1;
-cmp();
-if (!eax.b){goto label8;};
-eax.t = FIXNUM;
-eax.n = -1;
-goto label1;
-label8:;
+;
 label1:;
+;
+end:
 printf("Value of eax: ");
 print(eax);
 puts("");

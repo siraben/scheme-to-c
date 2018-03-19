@@ -18,10 +18,10 @@
          (begin
            (emit "eax.t = NIL")))))
 
-(emit-program
- '(cond ((eq? (cond ((eq? 8 (* 4 2))
-                     (let ((a 3) (b 1000))
-                       (* a b)))) 3000) 9999) ((eq? #t #t) -1)))
+;; (emit-program
+;;  '(cond ((eq? (cond ((eq? 8 (* 4 2))
+;;                      (let ((a 3) (b 1000))
+;;                        (* a b)))) 3000) 9999) ((eq? #t #t) -1)))
 
 (define (emit-cmp x y)
   (emit-exp x)
@@ -48,6 +48,11 @@
   (emit "print(eax)")
   (emit "puts(\"\")")
   (emit-no-colon "}"))
+
+(define (emit-display x)
+  (emit-expr x)
+  (emit "print(~s)" x)
+  (emit "puts(\"\")"))
 
 (define (emit-eq x)
   (let ((a (car x)) (b (cadr x)))
@@ -154,6 +159,25 @@
     (emit "pop()")
     (emit "eax.n *= al")))
 
+(define (emit-mod x)
+  (let ((a (car x)) (n (cadr x)))
+    (emit-expr a)
+    (emit "push()")
+    (emit-expr n)
+    (emit "al = eax.n")
+    (emit "pop()")
+    (emit "eax.n %= al")))
+
+(define (emit-div x)
+  (let ((a (car x)) (n (cadr x)))
+    (emit-expr a)
+    (emit "push()")
+    (emit-expr n)
+    (emit "al = eax.n")
+    (emit "pop()")
+    (emit "eax.n /= al")))
+
+
 (define (emit-expr x)
   (cond ((immediate? x)
          (emit-immediate x))
@@ -200,12 +224,36 @@
         ((eq? (car x) 'quote)
          (emit-quote (cadr x)))
         ((eq? (car x) 'cond)
-         (emit-cond (cdr x)))))
+         (emit-cond (cdr x)))
+        ((eq? (car x) 'set!)
+         (emit-set! (cdr x)))
+        ((eq? (car x) 'display)
+         (emit-display (cdr x)))
+        ((eq? (car x) 'label)
+         (emit-label (cadr x)))
+        ((eq? (car x) 'goto)
+         (emit-goto (cadr x)))
+        ((eq? (car x) 'remainder)
+         (emit-mod (cdr x)))
+        ((eq? (car x) '/)
+         (emit-div (cdr x)))))
 
+
+
+(define (emit-set! x)
+  (let ((definition (car x))
+        (body (cadr x)))
+    (if (symbol? definition)
+        (emit-set-var definition body)
+        (emit-no-colon "// NOT IMPLEMENTED"))))
+
+(define (emit-set-var var body)
+  (emit-expr body)
+  (emit "~s = eax" var))
 
 (define (emit-define x)
   (let ((definition (car x))
-        (body (caddr x)))
+        (body (cadr x)))
     (if (symbol? definition)
         (emit-define-var definition body)
         (emit-no-colon "// NOT IMPLEMENTED"))))
@@ -240,9 +288,12 @@
 (define (emit-quote x)
   (if (null? x)
       (emit "eax.t = NIL")
-      (if (symbol? x)
-          (emit "eax = *make_symbol(\"~s\")" x)
-          (emit-quoted-list x))))
+      (cond ((symbol? x)
+             (emit "eax = *make_symbol(\"~s\")" x))
+            ((pair? x)
+             (emit-quoted-list x))
+            ((immediate? x)
+             (emit-immediate x)))))
 
 (define (emit-let x)
   (let ((varlist (car x))
@@ -314,8 +365,6 @@
     (emit "~s:" end-label)
     (emit "")))
 
-
-
 ;; (emit-program '(let ((a 3))
 ;;                  (if (eq? a 3)
 ;;                      (let ((b 10))
@@ -332,3 +381,56 @@
 ;;                        (if (eq? a 10)
 ;;                            0
 ;;                            -1)))))
+
+
+;; How does one implement closures in C?
+;; There's the issue of free variables
+;; e.g. (let ((x 3)) ((lambda (a) (+ a x)) 5))
+;; x is "free" in this closure
+
+;; Therefore, a closure representation in C must have some sort of
+;; environment structure keeping track of free variables and the
+;; enclosing environment.
+
+;; This is a bit of a problem with the stack/register model, so it'll
+;; require some workarounds.
+
+;; I'll opt for an inefficient way to store environments as cons
+;; cells: ((a b c d...) 1 2 3 4 ...) this binds "a" with the value of
+;; 1, "b" with 2 etc.
+
+
+
+(define (emit-label x)
+  (emit-no-colon "~s:" x))
+
+(define (emit-goto x)
+  (emit "goto ~s" x))
+
+
+(define test-program
+  '(begin 
+     (define a 100)
+     (label foo)
+     (if (eq? a 0)
+         (goto end)
+         (begin (set! a (- a 1))
+                (display a)
+                (goto foo)))
+     (label end)))
+
+(define collatz-prog
+  '(begin
+     (define a 27)
+     (label foo)
+     (display a)
+     (if (eq? 1 a)
+         (goto end)
+         (if (eq? 1 (remainder a 2))
+             (begin
+               (set! a (+ (* 3 a) 1))
+               (goto foo))
+             (begin
+               (set! a (/ a 2))
+               (goto foo))))
+     (label end)))
