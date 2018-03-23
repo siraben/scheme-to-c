@@ -1,4 +1,5 @@
 *.o
 vm
-scheme-primitives
+vm2
+primitives
 example.c

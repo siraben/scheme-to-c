@@ -15,17 +15,17 @@
    (current-output-port)
    (lambda (p)
      (unless (output-port? p)
-       (error 'compile-port (format "Not an output port ~s." p)))
+             (error 'compile-port (format #t "Not an output port ~s." p)))
      p)))
 
 (define (emit . args)
-  (apply fprintf (compile-port) args)
-  (fprintf (compile-port) ";")
+  (apply format (compile-port) args)
+  (format (compile-port) ";")
   (newline (compile-port)))
 
 (define (emit-no-colon . args)
-  (apply fprintf (compile-port) args)
-  (fprintf (compile-port) "")
+  (apply format (compile-port) args)
+  (format (compile-port) "")
   (newline (compile-port)))
 
 (define runtime-file

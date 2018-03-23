@@ -1,8 +1,8 @@
 # compiler to use
-CC = gcc
+CC = clang
 
 # flags to pass compiler
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -Wshadow -Wextra
 
 # name for executable
 EXE = vm
@@ -12,7 +12,7 @@ HDRS =
 
 # space-separated list of libraries, if any,
 # each of which should be prefixed with -l
-LIBS =
+LIBS = -lgc
 
 # space-separated list of source files
 SRCS = vm.c

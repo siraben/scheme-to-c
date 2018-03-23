@@ -1,6 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <gc/gc.h>
+
+#define malloc(n) GC_MALLOC(n)
+#define calloc(m,n) GC_malloc((m)*(n))
+#define strdup(a) GC_STRDUP(a)
+#define strndup(a, b) GC_strndup(a, b)
 #define MAX_SYMBOL_LEN 32
 typedef enum type {FIXNUM, CHAR, BOOLEAN, NIL, PAIR, SYMBOL, STRING, CLOSURE} type;
 typedef struct reg {
@@ -23,7 +29,7 @@ typedef struct reg {
   };
 } reg;
 static int al;
-static reg eax, ebx;
+reg eax, ebx;
 
 typedef struct llist {
   reg curr;
@@ -33,7 +39,7 @@ typedef struct llist {
 llist *stack = 0;
 
 // Push eax onto stack
-static inline void push() {
+void push() {
   llist *head, *prev = stack;
   head = malloc(sizeof(llist));
   head->curr = eax;
@@ -42,15 +48,14 @@ static inline void push() {
 }
 
 // Replace eax with top of stack
-static inline void pop() {
+void pop() {
   llist *tail = stack->next;
   eax = stack->curr;
-  free(stack);
   stack = tail;
 }
 
 // Compare contents of eax with top of stack
-static inline void cmp() {
+void cmp() {
   ebx = eax;
   pop();
   if (eax.t != ebx.t) {
@@ -75,21 +80,27 @@ static inline void cmp() {
   eax.b = al;
 }
 
+void print();
+
 reg *car(reg *head) {
   if(head->t == PAIR) {
     return head->car;
   }
-  return 0;
+  print(head);
+  puts(" is not a pair!");
+  exit(1);
 }
 
 reg *cdr(reg *head) {
   if(head->t == PAIR) {
     return head->cdr;
   }
-  return 0;
+  print(head);
+  puts(" is not a pair!");
+  exit(1);
 }
 
-static inline void print(reg r) {
+void print(reg r) {
   if (r.t == BOOLEAN) {
     printf("%s", r.b ? "#t" : "#f");
   } else if (r.t == FIXNUM) {
@@ -118,7 +129,6 @@ static inline void print(reg r) {
         printf(" . ");
         print(*head);
         printf(")");
-        free(head);
         return;
       }
       goto print_pair;
@@ -184,83 +194,201 @@ reg *make_string(char *name) {
   return res;
 }
 
-// Collatz program
-// (begin
-//      (define a 27)
-//      (label foo)
-//      (display a)
-//      (if (eq? 1 a)
-//          (goto end)
-//          (if (eq? 1 (remainder a 2))
-//              (begin
-//                (set! a (+ (* 3 a) 1))
-//                (goto foo))
-//              (begin
-//                (set! a (/ a 2))
-//                (goto foo))))
-//      (label end))
+void lookup_in_frame(reg *frame)
+{
+  // assume that eax contains the symbol to look for
+  reg *var, *binding, symbol;
+  var = car(frame);
+  binding = cdr(frame);
+  symbol = eax;
+  for(; var->t != NIL || binding->t != NIL;
+      var = cdr(var), binding = cdr(binding))
+  {
+    eax = *car(var);
+    push();
+    eax = symbol;
+    cmp();
+    if (al == 1) {
+      // We found the symbol, "return" the binding in eax.
+      eax = *car(binding);
+      return;
+    }
+    // Failed, reloop
+  }
+  al = 0;
+}
 
+void lookup_in_env(reg *env)
+{
+  // assume that eax contains the symbol to look for
+  reg symbol, *frame;
+  frame = car(env);
+  symbol = eax;
+  for(; env->t != NIL; env = cdr(env))
+  {
+    frame = car(env);
+    eax = symbol;
+    lookup_in_frame(frame);
+    // Succeeded.
+    if (al == 1) {
+      return;
+    }
+  }
+  printf("Unbound symbol: ");
+  print(symbol);
+  puts("");
+  exit(1);
+}
+
+reg *env = 0;
 int main(int argc, char const *argv[])
 {
-eax.t = FIXNUM;
-eax.n = 27;
-reg a = eax;
-foo:
-print((a));
-puts("");
+  GC_INIT();
+
+eax = *make_symbol("g");
+push();
+eax = *make_symbol("b");
+push();
+eax = *make_symbol("c");
+push();
+eax = *make_symbol("d");
+push();
+eax.t = NIL;
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+push();
 eax.t = FIXNUM;
 eax.n = 1;
-push();
-eax = a;
-cmp();
-if (!eax.b){goto label2;};
-goto end;
-goto label1;
-label2:;
-eax.t = FIXNUM;
-eax.n = 1;
-push();
-eax = a;
 push();
 eax.t = FIXNUM;
 eax.n = 2;
-al = eax.n;
-pop();
-eax.n %= al;
-cmp();
-if (!eax.b){goto label4;};
+push();
 eax.t = FIXNUM;
 eax.n = 3;
 push();
-eax = a;
-al = eax.n;
+eax.t = FIXNUM;
+eax.n = 4;
+push();
+eax.t = NIL;
+ebx = eax;
 pop();
-eax.n *= al;
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+push();
+eax = *make_symbol("x");
+push();
+eax = *make_symbol("y");
+push();
+eax = *make_symbol("z");
+push();
+eax = *make_symbol("a");
+push();
+eax.t = NIL;
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
 push();
 eax.t = FIXNUM;
-eax.n = 1;
-al = eax.n;
-pop();
-eax.n += al;
-a = eax;
-goto foo;
-goto label3;
-label4:;
-eax = a;
+eax.n = 3;
 push();
 eax.t = FIXNUM;
-eax.n = 2;
-al = eax.n;
+eax.n = 4;
+push();
+eax.t = FIXNUM;
+eax.n = 5;
+push();
+eax.t = FIXNUM;
+eax.n = 3;
+push();
+eax.t = FIXNUM;
+eax.n = 4;
+push();
+eax.t = FIXNUM;
+eax.n = 5;
+push();
+eax.t = NIL;
+ebx = eax;
 pop();
-eax.n /= al;
-a = eax;
-goto foo;
-label3:;
-;
-label1:;
-;
-end:
-printf("Value of eax: ");
-print(eax);
-puts("");
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+push();
+eax.t = NIL;
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+push();
+eax.t = NIL;
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ 
+  ebx.t = NIL;
+  // Duplicate the contents of eax
+  env = car(cons(&eax, &ebx));
+
+  // eax contains
+  // (((g b c d) 1 2 3 4) ((x y z a) 3 4 5 (3 4 5)))
+  
+  printf("Value of eax: ");
+  print(eax);
+  puts("");
+  print(*env);
+  eax = *make_symbol("a");
+  puts("");
+  print(eax);
+  puts("");
+  lookup_in_env(env);
+  print(eax);
+  puts("");
 }
+

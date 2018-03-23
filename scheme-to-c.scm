@@ -1,5 +1,8 @@
 (load "tests-driver.scm")
 
+(define (atom? x)
+  (or (symbol? x) (null? x)))
+
 (define (immediate? x)
   (or (integer? x) (boolean? x) (null? x)))
 
@@ -41,8 +44,9 @@
   ;; (emit "} reg")
   ;; (emit "static int cmp")
   ;; (emit "static reg eax, ebx")
-  (emit-no-colon "int main(int argc, char const *argv[])")
+  (emit-no-colon "int main(void)")
   (emit-no-colon "{")
+  (emit "GC_INIT()")
   (emit-expr x)
   (emit "printf(\"Value of eax: \")")
   (emit "print(eax)")
@@ -177,6 +181,9 @@
     (emit "pop()")
     (emit "eax.n /= al")))
 
+(define (emit-exit x)
+  (emit "exit(~a)" x))
+
 
 (define (emit-expr x)
   (cond ((immediate? x)
@@ -192,7 +199,7 @@
         ((eq? (car x) 'char?)
          (emit-char? (cdr x)))
         ((eq? (car x) 'null?)
-         (emit-char? (cdr x)))
+         (emit-null? (cdr x)))
         ((eq? (car x) 'add1)
          (emit-add1 (cdr x)))
         ((eq? (car x) 'sub1)
@@ -236,9 +243,9 @@
         ((eq? (car x) 'remainder)
          (emit-mod (cdr x)))
         ((eq? (car x) '/)
-         (emit-div (cdr x)))))
-
-
+         (emit-div (cdr x)))
+        ((eq? (car x) 'exit)
+         (emit-exit (cadr x)))))
 
 (define (emit-set! x)
   (let ((definition (car x))
@@ -408,7 +415,11 @@
   (emit "goto ~s" x))
 
 
-(define test-program
+;; Some sample programs. The compiler works surprisingly well,
+;; allowing for more or less natural scheme programs sans the
+;; closures.
+
+(define counter-prog
   '(begin 
      (define a 100)
      (label foo)
@@ -434,3 +445,43 @@
                (set! a (/ a 2))
                (goto foo))))
      (label end)))
+
+
+(define reverse-prog
+  '(begin
+     (define a (quote (a b c d e)))
+     (define b (quote ()))
+     (label start)
+     (if (null? a)
+         (goto end)
+         (begin (set! b (cons (car a) b))
+                (display a)
+                (set! a (cdr a))
+                (goto start)))
+     (label end)
+     (display b)))
+
+(define lookup-prog
+  '(begin
+     (define sym (quote foo))
+     (define result (quote ()))
+     (define e (quote ((bar baz) (x y) (foo 5))))
+     (display sym)
+     (display e)
+     (label start)
+     (if (null? e)
+         (goto end)
+         (begin
+           (let ((frame (car e)))
+             (if (eq? (car frame) sym)
+                 (begin
+                   (set! result (car (cdr frame)))
+                   (goto end))
+                 (begin
+                   (set! e (cdr e))
+                   (goto start))))))
+     (goto end)
+     (display result)
+     (exit 0)))
+
+;; Idea: Just compile to an intermediate language without closures
