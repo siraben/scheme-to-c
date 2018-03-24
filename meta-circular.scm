@@ -45,10 +45,34 @@
              (lookup-in-env var (cdr env))))))
 
 
-(define (lookup sym env)
-  (cond ((null? env) (error "Unbound symbol: " sym))
-        ((eq? (caar env) sym) (cadar env))
-        (else (lookup sym (cdr env)))))
+(define (set-var-in-frame! var val frame)
+  (cond ((null? (car frame)) #f)
+        ((eq? var (caar frame))
+         (set-car! (cdr frame) val))
+        (else
+         (set-var-in-frame! var
+                            val
+                            (cons (cdar frame) (cddr frame))))))
+
+(define (add-binding-to-frame! var val frame)
+  (set-car! frame (cons var (car frame)))
+  (set-cdr! frame (cons val (cdr frame))))
+
+
+(define (set-var! var val env)
+  (define (set-var-search! var val frame)
+    (cond ((or (null? frame) (null? (car frame))) #f)
+          ((eq? var (caar frame))
+           (set-car! (cdr frame) val) #t)
+          (else (set-var-search! var val (cons (cdr (car frame))
+                                               (cddr frame)))
+                )))
+  (let ((res (or (set-var-search! var val (car env))
+                 (set-var! var val (cdr env)))))
+    (unless res
+      (error 'set-var! "Couldn't set var" var))))
+
+
 
 (define (evcond ps env)
   (cond ((null? exp) '())
@@ -56,7 +80,7 @@
          (eval (cadar ps) env))
         (else
          (if (eval (caar ps) env)
-             (eval (cadar ps) env)
+             (ev-begin (cdar ps) env)
              (evcond (cdr ps) env)))))
 
 (define (make-procedure args body env)
@@ -134,6 +158,19 @@
                  ((eq? 'c (car (cons 'a 'b)))
                   'two)
                  (else 'three)) 'three)
+(add-test '(cond ((eq? #t #t) 'a 'b)) 'b)
+
+(add-test '((lambda (reverse)
+              (reverse (quote (1 2 3 4 5 6 7 8 9))))
+
+            (lambda (list)
+              ((lambda (rev)
+                 (rev rev '() list))
+               (lambda (rev^ a l)
+                 (if (null? l)
+                     a
+                     (rev^ rev^ (cons (car l) a) (cdr l)))))))
+          '(9 8 7 6 5 4 3 2 1))
 
 ;; Format of a test:
 
