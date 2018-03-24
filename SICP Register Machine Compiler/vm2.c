@@ -157,7 +157,9 @@ void print(reg r) {
   }
 
   if (t == PAIR) {
-    reg *head = calloc(1, sizeof(reg));
+    reg *head;
+    head = calloc(1, sizeof(reg));
+    assert(head);
     *head = r;
     memcpy(head,&r,sizeof(reg));
     printf("(");
@@ -182,7 +184,7 @@ void print(reg r) {
 }
 
 reg *alloc_reg() {
-  reg *res = 0;
+  reg *res;
   res = calloc(1, sizeof(reg));
   return res;
 }
@@ -190,8 +192,11 @@ reg *alloc_reg() {
 reg *cons(reg *a, reg *b) {
   reg *res, *ac, *bc;
   res = alloc_reg();
+  assert(res);
   ac = alloc_reg();
+  assert(ac);
   bc = alloc_reg();
+  assert(bc);
   res->t = PAIR;
   memcpy(ac, a, sizeof(reg));
   memcpy(bc, b, sizeof(reg));
@@ -203,6 +208,7 @@ reg *cons(reg *a, reg *b) {
 reg *make_symbol(const char *name) {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = SYMBOL;
   res->s = strndup(name, MAX_SYMBOL_LEN);
   return res;
@@ -211,6 +217,7 @@ reg *make_symbol(const char *name) {
 reg *make_fixnum(long long value) {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = FIXNUM;
   res->n = value;
   return res;
@@ -225,6 +232,7 @@ reg *make_fixnum(long long value) {
 reg *make_string(const char *name) {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = STRING;
   res->s = strndup(name, MAX_SYMBOL_LEN);
   return res;
@@ -267,6 +275,7 @@ reg *sub_primop(reg *a, reg* b)
 {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = FIXNUM;
   if (a->t != FIXNUM || b->t != FIXNUM) {
     printf("sub_primop: Can't subtract ");
@@ -285,6 +294,7 @@ reg *add_primop(reg *a, reg* b)
 {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = FIXNUM;
   if (a->t != FIXNUM || b->t != FIXNUM) {
     printf("add_primop: Can't add ");
@@ -303,6 +313,7 @@ reg *mult_primop(reg *a, reg* b)
 {
   reg *res;
   res = alloc_reg();
+  assert(res);
   res->t = FIXNUM;
   if (a->t != FIXNUM || b->t != FIXNUM) {
     printf("mult_primop: Can't multiply ");

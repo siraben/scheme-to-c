@@ -1,4 +1,26 @@
-(load "tests-driver.scm")
+(define compile-port
+  (make-parameter
+   (current-output-port)
+   (lambda (p)
+     (unless (output-port? p)
+       (error 'compile-port (format #t "Not an output port ~s." p)))
+     p)))
+
+(define (emit . args)
+  (apply format (compile-port) args)
+  (format (compile-port) ";")
+  (newline (compile-port)))
+
+(define (emit-no-colon . args)
+  (apply format (compile-port) args)
+  (format (compile-port) "")
+  (newline (compile-port)))
+
+
+(define (emit-no-newline . args)
+  (apply format (compile-port) args)
+  (format (compile-port) ""))
+
 
 (define (atom? x)
   (or (symbol? x) (null? x)))
@@ -21,29 +43,8 @@
          (begin
            (emit "eax.t = NIL")))))
 
-;; (emit-program
-;;  '(cond ((eq? (cond ((eq? 8 (* 4 2))
-;;                      (let ((a 3) (b 1000))
-;;                        (* a b)))) 3000) 9999) ((eq? #t #t) -1)))
-
-(define (emit-cmp x y)
-  (emit-exp x)
-  (emit "push(eax)")
-  (emit-exp y)
-  (emit "ebx = pop()")
-  (emit "cmp = compare(pop(), eax)"))
-
 (define (emit-program x)
-  ;; Need to paste in everything before main() here
-  ;; (display "#include <stdio.h>\n")
-  ;; (display "#include <stdlib.h>\n")
-  ;; ;; Global variables
-  ;; (emit "typedef enum type {FIXNUM, CHAR, BOOLEAN} type")
-  
-  ;; (emit "typedef struct reg {type t;union {long long n; char c; int b;}")
-  ;; (emit "} reg")
-  ;; (emit "static int cmp")
-  ;; (emit "static reg eax, ebx")
+  ;; TODO: Emit helper functions rather than just main.
   (emit-no-colon "int main(void)")
   (emit-no-colon "{")
   (emit "GC_INIT()")

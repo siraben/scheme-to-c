@@ -6,7 +6,19 @@ This is an experiment in compiling Scheme to C.
 *Disclaimer*: I do not have any background in writing compilers. Pull
 requests are welcome!
 
-Here is the grammar that can be compiled.
+Also included in this repository:
+
+- A SICP register machine language to C compiler
+  - This is in the hopes that an existing Scheme to SICP register
+    machine compiler and be used as an IR on the way to C.
+- A meta-circular evaluator for Scheme
+  - Now includes tests!
+  - Includes lexical scoping and proper closures.
+  - [ ] Add mutation and `define`
+
+
+Grammar of input language
+-------------------------
 
 ``` xml
 <expr> := #t
@@ -43,88 +55,83 @@ Example use
 
 ``` scheme
 (begin
-     (define a 27)
-     (label foo)
-     (display a)
-     (if (eq? 1 a)
-         (goto end)
-         (if (eq? 1 (remainder a 2))
-             (begin
-               (set! a (+ (* 3 a) 1))
-               (goto foo))
-             (begin
-               (set! a (/ a 2))
-               (goto foo))))
-     (label end))
+  (define a (quote (a b c d e)))
+  (define b (quote ()))
+  (label start)
+  (if (null? a)
+      (goto end)
+      (begin (set! b (cons (car a) b))
+             (display a)
+             (set! a (cdr a))
+             (goto start)))
+  (label end)
+  (display b))
 ```
 
 Output
 ------
 
 ``` c
-// skipping ~ 200 lines of helper functions
-int main(int argc, char const *argv[])
+// Skipping ~ 200 lines of helper code
+int main(void)
 {
-eax.t = FIXNUM;
-eax.n = 27;
-reg a = eax;
-foo:
-print((a));
-puts("");
-eax.t = FIXNUM;
-eax.n = 1;
+GC_INIT();
+eax = *make_symbol("a");
 push();
+eax = *make_symbol("b");
+push();
+eax = *make_symbol("c");
+push();
+eax = *make_symbol("d");
+push();
+eax = *make_symbol("e");
+push();
+eax.t = NIL;
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+ebx = eax;
+pop();
+eax = *cons(&eax, &ebx);
+reg a = eax;
+eax.t = NIL;
+reg b = eax;
+start:
 eax = a;
-cmp();
+al = (eax.t == NIL);
+eax.t = BOOLEAN;
+eax.b = al;
 if (!eax.b){goto label2;};
 goto end;
 goto label1;
 label2:;
-eax.t = FIXNUM;
-eax.n = 1;
-push();
 eax = a;
+eax = *car(&eax);
 push();
-eax.t = FIXNUM;
-eax.n = 2;
-al = eax.n;
+eax = b;
+ebx = eax;
 pop();
-eax.n %= al;
-cmp();
-if (!eax.b){goto label4;};
-eax.t = FIXNUM;
-eax.n = 3;
-push();
+eax = *cons(&eax, &ebx);
+b = eax;
+print((a));
+puts("");
 eax = a;
-al = eax.n;
-pop();
-eax.n *= al;
-push();
-eax.t = FIXNUM;
-eax.n = 1;
-al = eax.n;
-pop();
-eax.n += al;
+eax = *cdr(&eax);
 a = eax;
-goto foo;
-goto label3;
-label4:;
-eax = a;
-push();
-eax.t = FIXNUM;
-eax.n = 2;
-al = eax.n;
-pop();
-eax.n /= al;
-a = eax;
-goto foo;
-label3:;
-;
+goto start;
 label1:;
 ;
 end:
-printf("Value of eax: ");
-print(eax);
+print((b));
 puts("");
 }
 ```
@@ -132,7 +139,7 @@ puts("");
 Running the code results in:
 
 ```
-Value of eax: 9999
+(e d c b a)
 ```
 Project Goals
 -------------
