@@ -27,7 +27,7 @@
 (define (make-frame vars vals)
   (cons vars vals))
 
-(define empty-environment '())
+
 
 (define (lookup-in-frame var frame)
   (cond ((null? (car frame)) #f)
@@ -64,15 +64,41 @@
     (cond ((or (null? frame) (null? (car frame))) #f)
           ((eq? var (caar frame))
            (set-car! (cdr frame) val) #t)
-          (else (set-var-search! var val (cons (cdr (car frame))
-                                               (cddr frame)))
-                )))
-  (let ((res (or (set-var-search! var val (car env))
-                 (set-var! var val (cdr env)))))
-    (unless res
-      (error 'set-var! "Couldn't set var" var))))
+          (else (set-var-search! var val
+                                 (cons (cdr (car frame))
+                                       (cddr frame))))))
+  (if (null? env)
+      #f
+      (or (set-var-search! var val (car env))
+          (set-var! var val (cdr env)))))
+
+(define (define-var! var val env)
+  (or (set-var! var val env)
+      (add-binding-to-frame! var val (car env))))
+
+(define the-empty-environment '())
+
+(define primitive-procedure-names
+  '(cons car cdr list + - * /))
+
+(define primitive-procedure-objects
+  (list cons car cdr list + - * /))
 
 
+(define (extend-environment vars vals env)
+  (cons (make-frame vars vals) env))
+
+
+(define (setup-environment)
+  (let ((initial-env
+         (extend-environment primitive-procedure-names
+                             primitive-procedure-objects
+                             the-empty-environment)))
+    (define-var! 'true #t initial-env)
+    (define-var! 'false #f initial-env)
+    initial-env))
+
+(define the-global-environment (setup-environment))
 
 (define (evcond ps env)
   (cond ((null? exp) '())
@@ -86,15 +112,34 @@
 (define (make-procedure args body env)
   (list 'procedure args body env))
 
+;; Replace the definitions for cons car and cdr with the following
+;; lines to replicate the "cons should not evaluate its arguments"
+;; behavior.
+
+;; ((tagged-list? exp 'car)
+;;  (if (quoted? (cadr exp))
+;;      (car (cadr exp))
+;;      (apply* (car (eval (cadr exp) env)) '())))
+
+;; ((tagged-list? exp 'cdr)
+;;  (if (quoted? (cadr exp))
+;;      (cdr (cadr exp))
+;;      (apply* (cdr (eval (cadr exp) env)) '())))
+;; ;; cons should not evaluate its arguments
+
+;; ((tagged-list? exp 'cons)
+;;  (cons (make-procedure '()
+;;                        (cons (cadr exp) '())
+;;                        env)
+;;        (make-procedure '()
+;;                        (cons (caddr exp) '())
+;;                        env)))
+
 (define (eval exp env)
   (cond
    ((self-evaluating? exp) exp)
    ((symbol? exp) (lookup-in-env exp env))
    ((tagged-list? exp 'quote) (cadr exp))
-   ((tagged-list? exp 'car) (car (eval (cadr exp) env)))
-   ((tagged-list? exp 'cdr) (cdr (eval (cadr exp) env)))
-   ((tagged-list? exp 'cons) (cons (eval (cadr exp) env)
-                                   (eval (caddr exp) env)))
    ((tagged-list? exp 'eq?) (eq? (eval (cadr exp) env)
                                  (eval (caddr exp) env)))
    ((tagged-list? exp 'if) (if (eval (cadr exp) env)
@@ -102,7 +147,26 @@
                                (eval (cadddr exp) env)))
    ((tagged-list? exp 'cond) (evcond (cdr exp) env))
    ((tagged-list? exp 'null?) (null? (eval (cadr exp) env)))
+
+   ((tagged-list? exp 'define)
+    (if (pair? (cadr exp))
+        (define-var!
+          (caadr exp)
+          (make-procedure (cdadr exp) (cddr exp) env)
+          env)
+        (define-var!
+          (cadr exp)
+          (eval (caddr exp) env)
+          env)))
    
+   ((tagged-list? exp 'set!)
+    (set-var!
+     (cadr exp)
+     (eval (caddr exp) env)
+     env))
+   ((tagged-list? exp 'begin)
+    (ev-begin (cdr exp) env))
+
    ;; Here's the big one, lambda! Extract the lambda body, and
    ;; make a closure with the extended environment
    ((tagged-list? exp 'lambda)
@@ -124,19 +188,17 @@
          (eval (car exps) env)
          (ev-begin (cdr exps) env))))
 
-(define (extend-environment vars vals env)
-  (cons (make-frame vars vals) env))
-
 (define (apply* proc args)
-  (cond ((procedure? proc)
-         (apply proc args))
-        ((compound-procedure? proc)
-         (ev-begin (caddr proc)
-                   (extend-environment
-                    (cadr proc)
-                    args
-                    (cadddr proc))))
-        (else (error 'apply* "Unknown application" proc))))
+  (cond
+   ((procedure? proc)
+    (apply proc args))
+   ((compound-procedure? proc)
+    (ev-begin (caddr proc)
+              (extend-environment
+               (cadr proc)
+               args
+               (cadddr proc))))
+   (else (error 'apply* "Unknown application" proc))))
 
 (add-test '(null? (cdr '(a))) #t)
 (add-test '((lambda (x) x) 'a) 'a)
@@ -172,6 +234,11 @@
                      (rev^ rev^ (cons (car l) a) (cdr l)))))))
           '(9 8 7 6 5 4 3 2 1))
 
+(add-test '((lambda (f g x) (f (g x)))
+            (lambda (x) (cons 'a x))
+            (lambda (x) (cons 'b x))
+            '(c))
+          '(a b c))
 ;; Format of a test:
 
 ;; ((<exp> . <expected result>) ...)
@@ -185,14 +252,15 @@
     (for-each
      (lambda (test-pair)
        (set! current-test (+ 1 current-test))
-       (let* ((exp (car test-pair))
-              (res (cdr test-pair))
-              (actual (eval exp '())))
+       (let ((exp (car test-pair))
+             (res (cdr test-pair))
+             (env (setup-environment)))
+         (define actual (eval exp env))
          (if (equal? actual res)
              (begin
                (set! success-count (+ 1 success-count))
                (if verbose
-                   (printf "Test ~a : ~a => ~a\n"
+                   (printf "Test ~a PASSED : ~a => ~a\n"
                            current-test
                            exp
                            res)))
@@ -201,8 +269,60 @@
                        current-test
                        exp
                        res
-                       actual))
-             )))
+                       actual)))))
      eval-test-list)
     (printf "\nDone. ~a of ~a tests passed.\n" success-count test-count)))
 
+;;(add-test '(append '(a b c) '(d e)) '())
+
+(add-test '(begin
+             (define append
+               (lambda (l s)
+                 (cond ((null? l) s)
+                       (else (cons (car l) (append (cdr l) s))))))
+             (append '(a b c) '(d e)))
+          '(a b c d e))
+
+(add-test '(begin
+             (define (append l s)
+               (cond ((null? l) s)
+                     (else (cons (car l) (append (cdr l) s)))))
+             (append '(a b c) '(d e)))
+          '(a b c d e))
+
+(add-test '(begin
+             (define x 'a)
+             (define (foo bar)
+               (define x bar)
+               (cons 'a x))
+             (foo 'b))
+          '(a . b))
+
+(add-test '(begin
+             (define x 'foo)
+             (define x 'bar)
+             x)
+          'bar)
+
+(add-test '(begin
+             (define x 'foo)
+             (define res '())
+             (define (thing) (set! x 'bar))
+             (set! res (cons x res))
+             (thing)
+             (set! res (cons x res))
+             res)
+          '(bar foo))
+
+
+(define (fib n)
+  (cond ((< n 2) n)
+        (else (+ (fib (- n 1))
+                 (fib (- n 2))))))
+(define (append* l s)
+  (cond ((null? l) s)
+        (else (cons (car l) (append* (cdr l) s)))))
+
+(define (reverse* l s)
+  (cond ((null? l) '())
+        (else (reverse* (cdr l) (cons (car l) s)))))
