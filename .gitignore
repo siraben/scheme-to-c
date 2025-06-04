@@ -4,3 +4,4 @@ vm2
 primitives
 example.c
 cons-alt.scm
+tests/output

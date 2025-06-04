@@ -3,6 +3,8 @@
 #include <string.h>
 #include <gc/gc.h>
 
+struct reg; // Forward declaration
+
 #define malloc(n) GC_MALLOC(n)
 #define calloc(m,n) GC_malloc((m)*(n))
 #define strdup(a) GC_STRDUP(a)
@@ -15,7 +17,9 @@ typedef enum type {FIXNUM,
                    PAIR,
                    SYMBOL,
                    STRING,
-                   CLOSURE} type;
+                   CLOSURE,
+                   PRIMITIVE_PROC} type;
+struct reg; // Forward declaration - already added above, ensure only one
 typedef struct reg {
   type t;
   union {
@@ -23,19 +27,19 @@ typedef struct reg {
     char c;
     char *s;
     int b;
-    struct {
+    struct { // PAIR
       struct reg *car;
       struct reg *cdr;
     };
-        // Closure
-    struct {
+    struct { // CLOSURE
       struct reg *vars;
       struct reg *body;
       struct reg *env;
     };
+    struct reg (*c_primitive_proc)(struct reg args_list); // Use 'struct reg'
   };
 } reg;
-static int al;
+int al;
 reg eax, ebx;
 
 typedef struct llist {
@@ -87,13 +91,26 @@ void cmp() {
   eax.b = al;
 }
 
-void print();
+void write_obj(reg r);
+void display_obj(reg r);
+reg* make_closure(reg* params, reg* body_expr, reg* captured_env);
+reg apply_closure(reg closure_obj, reg args_list_obj);
+reg eval_scheme_expr(reg expr, reg* current_eval_env);
+int list_length(reg list_obj);
+reg primitive_plus(reg args_list_obj); // Forward declaration
+reg primitive_zero_p(reg args_list_obj); // Forward declaration
+reg primitive_multiply(reg args_list_obj); // Forward declaration
+reg primitive_sub1(reg args_list_obj); // Forward declaration
+reg primitive_null_p(reg args_list_obj);
+reg primitive_car(reg args_list_obj);
+reg primitive_cdr(reg args_list_obj);
+reg primitive_cons(reg args_list_obj);
 
 reg *car(reg *head) {
   if(head->t == PAIR) {
     return head->car;
   }
-  print(head);
+  write_obj(*head);
   puts(" is not a pair!");
   exit(1);
 }
@@ -102,12 +119,12 @@ reg *cdr(reg *head) {
   if(head->t == PAIR) {
     return head->cdr;
   }
-  print(head);
+  write_obj(*head);
   puts(" is not a pair!");
   exit(1);
 }
 
-void print(reg r) {
+void write_obj(reg r) {
   if (r.t == BOOLEAN) {
     printf("%s", r.b ? "#t" : "#f");
   } else if (r.t == FIXNUM) {
@@ -120,6 +137,10 @@ void print(reg r) {
     printf("%s", r.s);
   } else if ( r.t == STRING) {
     printf("\"%s\"", r.s);
+  } else if (r.t == CLOSURE) {
+    printf("#<closure>");
+  } else if (r.t == PRIMITIVE_PROC) {
+    printf("#<primitive>");
   }
 
   if (r.t == PAIR) {
@@ -128,17 +149,59 @@ void print(reg r) {
     printf("(");
     print_pair:
 
-    print(*car(head));
+    write_obj(*car(head));
     if (cdr(head)->t != NIL) {
       printf(" ");
       head = cdr(head);
       if (head->t != PAIR) {
         printf(" . ");
-        print(*head);
+        write_obj(*head);
         printf(")");
         return;
       }
       goto print_pair;
+    }
+    printf(")");
+  }
+}
+
+// Function to display Scheme objects (strings without quotes)
+void display_obj(reg r) {
+  if (r.t == BOOLEAN) {
+    printf("%s", r.b ? "#t" : "#f");
+  } else if (r.t == FIXNUM) {
+    printf("%lld", r.n);
+  } else if (r.t == CHAR) {
+    putchar(r.c);
+  } else if (r.t == NIL) {
+    printf("()");
+  } else if ( r.t == SYMBOL) {
+    printf("%s", r.s);
+  } else if ( r.t == STRING) {
+    printf("%s", r.s); // Changed for display_obj: no quotes for strings
+  } else if (r.t == CLOSURE) {
+    printf("#<closure>");
+  } else if (r.t == PRIMITIVE_PROC) {
+    printf("#<primitive>");
+  }
+
+  if (r.t == PAIR) {
+    reg *head = calloc(1, sizeof(reg));
+    memcpy(head,&r,sizeof(reg));
+    printf("(");
+    print_pair_display: // Renamed label for clarity
+
+    display_obj(*car(head)); // Recursive call to display_obj
+    if (cdr(head)->t != NIL) {
+      printf(" ");
+      head = cdr(head);
+      if (head->t != PAIR) {
+        printf(" . ");
+        display_obj(*head); // Recursive call to display_obj
+        printf(")");
+        return;
+      }
+      goto print_pair_display;
     }
     printf(")");
   }
@@ -151,7 +214,17 @@ reg *cons(reg *a, reg *b) {
   bc = calloc(1, sizeof(reg));
   res->t = PAIR;
   memcpy(ac, a, sizeof(reg));
+  #ifdef DEBUG_VM
+  if (a->t == PRIMITIVE_PROC) {
+      printf("DEBUG: cons (memcpy ac from a) - a->c_primitive_proc = %p, ac->c_primitive_proc = %p\n", (void*)a->c_primitive_proc, (void*)ac->c_primitive_proc);
+  }
+  #endif
   memcpy(bc, b, sizeof(reg));
+  #ifdef DEBUG_VM
+  if (b->t == PRIMITIVE_PROC) {
+      printf("DEBUG: cons (memcpy bc from b) - b->c_primitive_proc = %p, bc->c_primitive_proc = %p\n", (void*)b->c_primitive_proc, (void*)bc->c_primitive_proc);
+  }
+  #endif
   res->car = ac;
   res->cdr = bc;
   return res;
@@ -242,14 +315,125 @@ void lookup_in_env(reg *env)
     }
   }
   printf("Unbound symbol: ");
-  print(symbol);
+  write_obj(symbol);
   puts("");
   exit(1);
 }
 
-reg *env = 0;
-int main(int argc, char const *argv[])
+// Initialize global env to point to a NIL object rather than being NULL itself.
+reg actual_nil_for_global_env; // Statically/globally allocated reg struct
+reg *env = NULL; // Will be initialized in vm_test_main or actual main
+
+void initialize_global_env() {
+    if (env == NULL) { // Initialize only once
+        #ifdef DEBUG_VM
+        printf("DEBUG: Initializing global environment...\n");
+        #endif
+
+        // List of symbols
+        reg* plus_symbol = make_symbol("+");
+        reg* zero_p_symbol = make_symbol("zero?");
+        reg* multiply_symbol = make_symbol("*");
+        reg* sub1_symbol = make_symbol("sub1");
+        reg* null_p_symbol = make_symbol("null?");
+        reg* car_symbol = make_symbol("car");
+        reg* cdr_symbol = make_symbol("cdr");
+        reg* cons_symbol = make_symbol("cons");
+
+        // List of primitive procedure objects
+        reg* plus_prim_obj = alloc_reg(); plus_prim_obj->t = PRIMITIVE_PROC;
+        plus_prim_obj->n = 0; plus_prim_obj->s = NULL; plus_prim_obj->car = NULL; plus_prim_obj->cdr = NULL;
+        plus_prim_obj->vars = NULL; plus_prim_obj->body = NULL; plus_prim_obj->env = NULL;
+        plus_prim_obj->c_primitive_proc = primitive_plus;
+
+        reg* zero_p_prim_obj = alloc_reg(); zero_p_prim_obj->t = PRIMITIVE_PROC;
+        zero_p_prim_obj->n = 0; zero_p_prim_obj->s = NULL; zero_p_prim_obj->car = NULL; zero_p_prim_obj->cdr = NULL;
+        zero_p_prim_obj->vars = NULL; zero_p_prim_obj->body = NULL; zero_p_prim_obj->env = NULL;
+        zero_p_prim_obj->c_primitive_proc = primitive_zero_p;
+
+        reg* multiply_prim_obj = alloc_reg(); multiply_prim_obj->t = PRIMITIVE_PROC;
+        multiply_prim_obj->n = 0; multiply_prim_obj->s = NULL; multiply_prim_obj->car = NULL; multiply_prim_obj->cdr = NULL;
+        multiply_prim_obj->vars = NULL; multiply_prim_obj->body = NULL; multiply_prim_obj->env = NULL;
+        multiply_prim_obj->c_primitive_proc = primitive_multiply;
+
+        reg* sub1_prim_obj = alloc_reg(); sub1_prim_obj->t = PRIMITIVE_PROC;
+        sub1_prim_obj->n = 0; sub1_prim_obj->s = NULL; sub1_prim_obj->car = NULL; sub1_prim_obj->cdr = NULL;
+        sub1_prim_obj->vars = NULL; sub1_prim_obj->body = NULL; sub1_prim_obj->env = NULL;
+        sub1_prim_obj->c_primitive_proc = primitive_sub1;
+
+        reg* null_p_prim_obj = alloc_reg(); null_p_prim_obj->t = PRIMITIVE_PROC;
+        null_p_prim_obj->n = 0; null_p_prim_obj->s = NULL; null_p_prim_obj->car = NULL; null_p_prim_obj->cdr = NULL;
+        null_p_prim_obj->vars = NULL; null_p_prim_obj->body = NULL; null_p_prim_obj->env = NULL;
+        null_p_prim_obj->c_primitive_proc = primitive_null_p;
+
+        reg* car_prim_obj = alloc_reg(); car_prim_obj->t = PRIMITIVE_PROC;
+        car_prim_obj->n = 0; car_prim_obj->s = NULL; car_prim_obj->car = NULL; car_prim_obj->cdr = NULL;
+        car_prim_obj->vars = NULL; car_prim_obj->body = NULL; car_prim_obj->env = NULL;
+        car_prim_obj->c_primitive_proc = primitive_car;
+
+        reg* cdr_prim_obj = alloc_reg(); cdr_prim_obj->t = PRIMITIVE_PROC;
+        cdr_prim_obj->n = 0; cdr_prim_obj->s = NULL; cdr_prim_obj->car = NULL; cdr_prim_obj->cdr = NULL;
+        cdr_prim_obj->vars = NULL; cdr_prim_obj->body = NULL; cdr_prim_obj->env = NULL;
+        cdr_prim_obj->c_primitive_proc = primitive_cdr;
+
+        reg* cons_prim_obj = alloc_reg(); cons_prim_obj->t = PRIMITIVE_PROC;
+        cons_prim_obj->n = 0; cons_prim_obj->s = NULL; cons_prim_obj->car = NULL; cons_prim_obj->cdr = NULL;
+        cons_prim_obj->vars = NULL; cons_prim_obj->body = NULL; cons_prim_obj->env = NULL;
+        cons_prim_obj->c_primitive_proc = primitive_cons;
+
+        #ifdef DEBUG_VM
+        printf("DEBUG: Initialized primitive objects: + (%p), zero? (%p), * (%p), sub1 (%p), null? (%p), car (%p), cdr (%p), cons (%p)\n",
+               (void*)plus_prim_obj->c_primitive_proc,
+               (void*)zero_p_prim_obj->c_primitive_proc,
+               (void*)multiply_prim_obj->c_primitive_proc,
+               (void*)sub1_prim_obj->c_primitive_proc,
+               (void*)null_p_prim_obj->c_primitive_proc,
+               (void*)car_prim_obj->c_primitive_proc,
+               (void*)cdr_prim_obj->c_primitive_proc,
+               (void*)cons_prim_obj->c_primitive_proc);
+        #endif
+
+        reg* nil_ptr = alloc_reg(); nil_ptr->t = NIL;
+
+        // Construct the list of symbols: (cons cdr car null? sub1 * zero? +)
+        reg* prim_symbols = cons(plus_symbol, nil_ptr);      // (+)
+        prim_symbols = cons(zero_p_symbol, prim_symbols);    // (zero? +)
+        prim_symbols = cons(multiply_symbol, prim_symbols);  // (* zero? +)
+        prim_symbols = cons(sub1_symbol, prim_symbols);      // (sub1 * zero? +)
+        prim_symbols = cons(null_p_symbol, prim_symbols);    // (null? sub1 * zero? +)
+        prim_symbols = cons(car_symbol, prim_symbols);       // (car null? sub1 * zero? +)
+        prim_symbols = cons(cdr_symbol, prim_symbols);       // (cdr car null? sub1 * zero? +)
+        prim_symbols = cons(cons_symbol, prim_symbols);      // (cons cdr car null? sub1 * zero? +)
+
+
+        // Construct the list of values (primitive objects): (#<cons_obj> #<cdr_obj> #<car_obj> #<null_obj> #<sub1_obj> #<mul_obj> #<zero_obj> #<plus_obj>)
+        reg* prim_values = cons(plus_prim_obj, nil_ptr);       // (#<plus_obj>)
+        prim_values = cons(zero_p_prim_obj, prim_values);      // (#<zero_obj> #<plus_obj>)
+        prim_values = cons(multiply_prim_obj, prim_values);    // (#<mul_obj> #<zero_obj> #<plus_obj>)
+        prim_values = cons(sub1_prim_obj, prim_values);        // (#<sub1_obj> #<mul_obj> #<zero_obj> #<plus_obj>)
+        prim_values = cons(null_p_prim_obj, prim_values);      // (#<null?> #<sub1_obj> ...)
+        prim_values = cons(car_prim_obj, prim_values);         // (#<car_obj> #<null?> ...)
+        prim_values = cons(cdr_prim_obj, prim_values);         // (#<cdr_obj> #<car_obj> ...)
+        prim_values = cons(cons_prim_obj, prim_values);        // (#<cons_obj> #<cdr_obj> ...)
+
+        reg* global_frame = cons(prim_symbols, prim_values);
+        env = cons(global_frame, nil_ptr); // env = ( ( (sub1 * zero? +) . (#<sub1> #<mult> #<zero?> #<+>) ) . () )
+
+        #ifdef DEBUG_VM
+        printf("DEBUG: Global env initialized. Env = "); write_obj(*env); puts("");
+        #endif
+    } else {
+        #ifdef DEBUG_VM
+        printf("DEBUG: Global environment already initialized.\n");
+        #endif
+    }
+}
+
+int vm_test_main(int argc, char const *argv[])
 {
+  initialize_global_env();
+  (void)argc;
+  (void)argv;
   GC_INIT();
 
   eax = *make_symbol("g");
@@ -387,15 +571,665 @@ int main(int argc, char const *argv[])
   // (((g b c d) 1 2 3 4) ((x y z a) 3 4 5 (3 4 5)))
   
   printf("Value of eax: ");
-  print(eax);
+  write_obj(eax);
   puts("");
-  print(*env);
+  write_obj(*env);
   eax = *make_symbol("a");
   puts("");
-  print(eax);
+  write_obj(eax);
   puts("");
   lookup_in_env(env);
-  print(eax);
+  display_obj(eax);
   puts("");
+  return 0;
+}
+
+reg* make_closure(reg* params, reg* body_expr, reg* captured_env) {
+    reg* closure_obj = alloc_reg(); // Use existing helper for allocation
+    closure_obj->t = CLOSURE;
+
+    // The params and body_expr are pointers to 'reg' structs.
+    // The closure needs to own its copies of these, as the originals might be temporary.
+    closure_obj->vars = alloc_reg(); // Allocate space for the 'vars' reg struct
+    memcpy(closure_obj->vars, params, sizeof(reg)); // Copy the content
+
+    closure_obj->body = alloc_reg(); // Allocate space for the 'body' reg struct
+    memcpy(closure_obj->body, body_expr, sizeof(reg)); // Copy the content
+
+    // captured_env is a pointer to an existing environment structure.
+    closure_obj->env = captured_env;
+
+    return closure_obj;
+}
+
+reg apply_closure(reg closure_obj, reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: apply_closure called.\n");
+    printf("DEBUG: Closure object: "); write_obj(closure_obj); puts("");
+    printf("DEBUG: Arguments list: "); write_obj(args_list_obj); puts("");
+    #endif
+
+    if (closure_obj.t != CLOSURE) {
+        printf("ERROR: Attempted to apply non-closure object.\n");
+        write_obj(closure_obj);
+        puts(" is not a closure.");
+        exit(1);
+    }
+
+    reg* formal_params_list = closure_obj.vars; // This is a reg* pointing to a list of symbols
+    reg* body_expr_ptr = closure_obj.body;     // This is a reg* pointing to the body expression
+    reg* captured_env = closure_obj.env;     // This is a reg*
+
+    // Arity check
+    int params_count = list_length(*formal_params_list);
+    int args_count = list_length(args_list_obj);
+
+    #ifdef DEBUG_VM
+    printf("DEBUG: Arity check - Params: %d, Args: %d\n", params_count, args_count);
+    #endif
+
+    if (params_count != args_count) {
+        printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
+        // Depending on strictness, could exit or return an error object
+        exit(1);
+    }
+
+    // Construct new environment frame: ( (param_symbols_list) (actual_args_values_list) )
+    // The params list is closure_obj.vars (a reg* to a list)
+    // The args list is args_list_obj (a reg, which is a list)
+    
+    // We need to make args_list_obj a reg* for cons.
+    // A bit of a hack: allocate a temp reg to hold args_list_obj to pass its address to cons.
+    // Proper memory management for these temp regs is important with GC.
+    // Or, better, ensure cons can take (reg*, reg*) or adapt.
+    // For now, let's assume args_list_obj (a reg) can be used if cons takes (reg*, reg*), where one is by value.
+    // The current cons takes (reg*, reg*). So args_list_obj needs to be a pointer.
+    
+    reg* args_list_obj_ptr = alloc_reg(); // Allocate a reg on the heap
+    memcpy(args_list_obj_ptr, &args_list_obj, sizeof(reg)); // Copy args_list_obj content to it
+
+    reg* new_frame_bindings = cons(formal_params_list, args_list_obj_ptr);
+    
+    // Extend captured environment
+    // captured_env should now always be a valid pointer (to NIL or a PAIR)
+    reg* eval_env = cons(new_frame_bindings, captured_env); 
+
+    #ifdef DEBUG_VM
+    printf("DEBUG: apply_closure - New evaluation environment: "); 
+    if (eval_env) write_obj(*eval_env); else printf("(null eval_env!) "); 
+    puts("");
+    #endif
+
+    reg result = eval_scheme_expr(*body_expr_ptr, eval_env);
+
+    #ifdef DEBUG_VM
+    printf("DEBUG: apply_closure returning result from eval_scheme_expr.\n");
+    #endif
+    return result;
+}
+
+// Helper function to get the length of a Scheme list (dotted pairs not fully handled)
+int list_length(reg list_obj) {
+    if (list_obj.t == NIL) return 0;
+    if (list_obj.t != PAIR) {
+        // This isn't a proper list for length calculation in this context
+        // Or it's a dotted pair at the end. For arity, we care about proper list structure.
+        printf("Warning: list_length called on non-pair/non-nil or improper list tail\n");
+        return -1; // Indicate error or improper list
+    }
+    int count = 0;
+    reg* current = &list_obj;
+    while (current->t == PAIR) {
+        count++;
+        current = current->cdr;
+    }
+    if (current->t != NIL) {
+        printf("Warning: Improper list for length calculation (dotted pair ending)\n");
+        return -1; // Or count, depending on how dotted pairs should affect length here
+    }
+    return count;
+}
+
+// Helper function to check if a Scheme symbol reg matches a C string name
+int is_symbol_eq(reg symbol_reg, const char* c_name) {
+    if (symbol_reg.t != SYMBOL) {
+        return 0; // Not a symbol
+    }
+    if (symbol_reg.s == NULL || c_name == NULL) {
+        return 0; // Should not happen with valid symbols/names
+    }
+    return strncmp(symbol_reg.s, c_name, MAX_SYMBOL_LEN) == 0;
+}
+
+reg eval_scheme_expr(reg expr, reg* current_eval_env) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: eval_scheme_expr called.\n");
+    printf("DEBUG: Expr to eval: "); write_obj(expr); puts("");
+    printf("DEBUG: Eval Env (ptr %p): ", (void*)current_eval_env); 
+    if(current_eval_env) { 
+        write_obj(*current_eval_env); 
+    } else {
+        printf("(null C env pointer - problem!)"); 
+    }
+    puts("");
+    #endif
+
+    // Self-evaluating types
+    if (expr.t == FIXNUM || expr.t == BOOLEAN || expr.t == NIL || expr.t == CHAR || expr.t == STRING) {
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - SELF-EVALUATING: "); write_obj(expr); puts("");
+        #endif
+        return expr;
+    }
+
+    // SYMBOL - Lookup in environment
+    if (expr.t == SYMBOL) {
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - SYMBOL: "); write_obj(expr); puts("");
+        #endif
+        reg preserved_eax = eax; // Preserve global eax state if lookup_in_env relies on it heavily
+        eax = expr;              // lookup_in_env expects symbol in global eax
+        lookup_in_env(current_eval_env);
+        reg found_val = eax;     // lookup_in_env puts result in global eax
+        eax = preserved_eax;     // Restore global eax
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - SYMBOL LOOKUP RESULT: "); write_obj(found_val); 
+        if (found_val.t == PRIMITIVE_PROC) {
+            printf(", c_primitive_proc = %p", (void*)found_val.c_primitive_proc);
+        }
+        puts("");
+        #endif
+        return found_val;
+    }
+
+    // PAIR - Could be special form or application
+    if (expr.t == PAIR) {
+        // Ensure car is not null before trying to access its members
+        if (expr.car == NULL) {
+            printf("ERROR: Malformed pair in expression - car is NULL\n");
+            exit(1); // Or return error object
+        }
+        reg first_elem = *(expr.car);
+
+        // QUOTE: (quote <datum>)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "quote")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - QUOTE: "); write_obj(expr); puts("");
+            #endif
+            // Basic structure check: (quote <datum>). <datum> is cadr.
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL) { 
+                printf("ERROR: Malformed quote expression - expected (quote <datum>)\n");
+                exit(1); 
+            }
+            reg datum = *(expr.cdr->car); // This is cadr(expr)
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - QUOTE returning: "); write_obj(datum); puts("");
+            #endif
+            return datum;
+        }
+
+        // IF: (if test consequent optional-alternative)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "if")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - IF: "); write_obj(expr); puts("");
+            #endif
+
+            // Structure check: (if <test> <consequent> ...)
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL || // Missing <test>
+                expr.cdr->cdr == NULL || expr.cdr->cdr->t != PAIR || expr.cdr->cdr->car == NULL) { // Missing <consequent>
+                printf("ERROR: Malformed if expression - expected (if <test> <consequent> ...)\n");
+                exit(1);
+            }
+
+            reg test_expr = *(expr.cdr->car);           // cadr(expr)
+            reg conseq_expr = *(expr.cdr->cdr->car);   // caddr(expr)
+            
+            reg alt_expr;
+            int has_alternative = 0;
+            // Check for <alternative> (cadddr(expr))
+            if (expr.cdr->cdr->cdr != NULL && expr.cdr->cdr->cdr->t == PAIR && expr.cdr->cdr->cdr->car != NULL) {
+                alt_expr = *(expr.cdr->cdr->cdr->car);
+                has_alternative = 1;
+                // Check if there are more expressions after alternative (malformed)
+                if (expr.cdr->cdr->cdr->cdr != NULL && expr.cdr->cdr->cdr->cdr->t != NIL) {
+                    printf("ERROR: Malformed if expression - too many forms after alternative\n");
+                    exit(1);
+                }
+            } else if (expr.cdr->cdr->cdr != NULL && expr.cdr->cdr->cdr->t == NIL) {
+                // This means the form was (if test conseq) and we are at the end of the list.
+                has_alternative = 0;
+            } else {
+                // Anything else after conseq that isn't a proper list for alt or NIL ending means malformed.
+                // This case could also be (if test conseq) if expr.cdr->cdr->cdr is NULL (not typical for parser output)
+                #ifdef DEBUG_VM
+                printf("DEBUG: if expression appears to be (if test conseq) or malformed end.");
+                #endif
+                // Assuming this means (if test conseq) and the list just ends.
+                has_alternative = 0; 
+            }
+
+            reg test_result = eval_scheme_expr(test_expr, current_eval_env);
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - IF test_result: "); write_obj(test_result); puts("");
+            #endif
+
+            int condition_is_true = 1; // In Scheme, only #f (boolean type, value 0) is false.
+            if (test_result.t == BOOLEAN && test_result.b == 0) {
+                condition_is_true = 0;
+            }
+
+            if (condition_is_true) {
+                #ifdef DEBUG_VM
+                printf("DEBUG: eval_scheme_expr - IF evaluating consequent\n");
+                #endif
+                return eval_scheme_expr(conseq_expr, current_eval_env);
+            } else {
+                if (has_alternative) {
+                    #ifdef DEBUG_VM
+                    printf("DEBUG: eval_scheme_expr - IF evaluating alternative\n");
+                    #endif
+                    return eval_scheme_expr(alt_expr, current_eval_env);
+                } else {
+                    #ifdef DEBUG_VM
+                    printf("DEBUG: eval_scheme_expr - IF no alternative, returning NIL (unspecified)\n");
+                    #endif
+                    reg nil_return_val;
+                    nil_return_val.t = NIL;
+                    return nil_return_val;
+                }
+            }
+        }
+
+        // LAMBDA: (lambda (param...) body-expr)
+        // For now, assumes lambda has exactly one body expression.
+        // R5RS allows multiple, which acts like an implicit (begin ...)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "lambda")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - LAMBDA: "); write_obj(expr); puts("");
+            #endif
+
+            // Structure check: (lambda <params> <body>)
+            // <params> is cadr(expr), <body> is caddr(expr)
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL ||        // Missing <params>
+                expr.cdr->cdr == NULL || expr.cdr->cdr->t != PAIR || expr.cdr->cdr->car == NULL || // Missing <body>
+                (expr.cdr->cdr->cdr != NULL && expr.cdr->cdr->cdr->t != NIL) ) { // Disallow extra forms after body for now
+                printf("ERROR: Malformed lambda expression - expected (lambda <params> <body>)\n");
+                exit(1);
+            }
+
+            reg* params_list_ptr = expr.cdr->car;  // cadr(expr) - already a reg*
+            reg* body_expr_ptr = expr.cdr->cdr->car; // caddr(expr) - already a reg*
+
+            // Params list should be a list of symbols or NIL for lambda ()
+            if (params_list_ptr->t != PAIR && params_list_ptr->t != NIL) {
+                 printf("ERROR: Lambda parameters must be a list.\n");
+                 exit(1);
+            }
+            // Further validation: check if all elements in params_list_ptr are symbols (can be added later)
+            
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - LAMBDA creating closure. Captured env: "); 
+            if(current_eval_env && current_eval_env->t != NIL) { write_obj(*current_eval_env); } else { printf("(empty)"); }
+            puts("");
+            #endif
+
+            reg* new_closure = make_closure(params_list_ptr, body_expr_ptr, current_eval_env);
+            return *new_closure; // make_closure returns reg*, eval_scheme_expr returns reg
+        }
+
+        // BEGIN: (begin expr1 expr2 ... exprN)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "begin")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - BEGIN: "); write_obj(expr); puts("");
+            #endif
+            // If (begin) with no expressions, R5RS says result is unspecified. We return NIL.
+            if (expr.cdr == NULL || expr.cdr->t == NIL) {
+                #ifdef DEBUG_VM
+                printf("DEBUG: eval_scheme_expr - (begin) with no expressions, returning NIL\n");
+                #endif
+                reg nil_val; nil_val.t = NIL;
+                return nil_val;
+            }
+
+            if (expr.cdr->t != PAIR) {
+                printf("ERROR: Malformed begin expression - body is not a list\n");
+                exit(1);
+            }
+
+            reg* current_stmt_node = expr.cdr;
+            reg last_val; // To store the result of the last expression
+            last_val.t = NIL; // Default if begin somehow ends up empty after all (should not with check above)
+            int evaluated_at_least_one = 0;
+
+            while(current_stmt_node != NULL && current_stmt_node->t == PAIR) {
+                if (current_stmt_node->car == NULL) { 
+                    printf("ERROR: Malformed begin - null expression in body\n"); exit(1); 
+                }
+                last_val = eval_scheme_expr(*(current_stmt_node->car), current_eval_env);
+                evaluated_at_least_one = 1;
+                current_stmt_node = current_stmt_node->cdr;
+            }
+            // After the loop, if current_stmt_node is not NIL, the list of expressions was improper.
+            if (current_stmt_node != NULL && current_stmt_node->t != NIL) {
+                printf("ERROR: Malformed begin expression - improper list of statements\n");
+                exit(1);
+            }
+            if (!evaluated_at_least_one) { // Should be caught by the (expr.cdr == NULL || expr.cdr->t == NIL) check
+                 #ifdef DEBUG_VM
+                 printf("DEBUG: eval_scheme_expr - (begin) was effectively empty, returning NIL\n");
+                 #endif
+                 reg nil_val; nil_val.t = NIL; return nil_val;
+            }
+            return last_val;
+        }
+
+        // APPLICATION: (proc-expr arg1-expr ...)
+        // This is the default case for a PAIR that is not a special form.
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - APPLICATION: "); write_obj(expr); puts("");
+        #endif
+
+        reg proc_expr = first_elem; // Correct: first_elem was *(expr.car)
+        reg* arg_exprs_list_ptr = expr.cdr; // This is the list of argument expressions (unevaluated)
+
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - Evaluating procedure part\n");
+        #endif
+        reg proc_obj = eval_scheme_expr(proc_expr, current_eval_env);
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - Evaluated procedure: "); write_obj(proc_obj); 
+        if (proc_obj.t == PRIMITIVE_PROC) {
+            printf(", c_primitive_proc before check = %p", (void*)proc_obj.c_primitive_proc);
+        }
+        puts("");
+        #endif
+
+        // Evaluate arguments and build a list of argument values
+        reg evaluated_args_list_obj;
+        evaluated_args_list_obj.t = NIL;
+        reg* temp_reversed_args_head = alloc_reg(); // For building args list in reverse
+        temp_reversed_args_head->t = NIL;
+
+        reg* current_arg_expr_node = arg_exprs_list_ptr;
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - Evaluating arguments...\n");
+        #endif
+        while(current_arg_expr_node != NULL && current_arg_expr_node->t == PAIR) {
+            if (current_arg_expr_node->car == NULL) { 
+                printf("ERROR: Malformed application - null argument expression\n"); exit(1); 
+            }
+            reg current_arg_val = eval_scheme_expr(*(current_arg_expr_node->car), current_eval_env);
+            
+            reg* current_arg_val_ptr = alloc_reg(); // cons needs reg*
+            memcpy(current_arg_val_ptr, &current_arg_val, sizeof(reg));
+            
+            temp_reversed_args_head = cons(current_arg_val_ptr, temp_reversed_args_head);
+            current_arg_expr_node = current_arg_expr_node->cdr;
+        }
+        // Check if the argument list was proper
+        if (current_arg_expr_node != NULL && current_arg_expr_node->t != NIL) {
+            printf("ERROR: Malformed application - improper list of argument expressions\n");
+            exit(1);
+        }
+
+        // Reverse the temp_reversed_args_head to get args in correct order
+        reg* final_args_list_head = alloc_reg();
+        final_args_list_head->t = NIL;
+        reg* p = temp_reversed_args_head;
+        while (p != NULL && p->t == PAIR) {
+            // p->car is already a reg* pointing to the evaluated argument value
+            final_args_list_head = cons(p->car, final_args_list_head);
+            p = p->cdr;
+        }
+        evaluated_args_list_obj = *final_args_list_head;
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr - Evaluated arguments list: "); write_obj(evaluated_args_list_obj); puts("");
+        #endif
+
+        // Now, apply the procedure
+        if (proc_obj.t == CLOSURE) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - Applying closure\n");
+            #endif
+            return apply_closure(proc_obj, evaluated_args_list_obj);
+        }
+        else if (proc_obj.t == PRIMITIVE_PROC) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - Applying PRIMITIVE_PROC, proc_obj.c_primitive_proc = %p\n", (void*)proc_obj.c_primitive_proc);
+            #endif
+            if (proc_obj.c_primitive_proc == NULL) {
+                printf("ERROR: Primitive procedure object has NULL function pointer!\n");
+                exit(1);
+            }
+            return proc_obj.c_primitive_proc(evaluated_args_list_obj);
+        }
+        else {
+            printf("ERROR: Attempt to apply non-procedure/non-primitive: "); write_obj(proc_obj); puts("");
+            exit(1);
+        }
+    }
+
+    printf("ERROR: eval_scheme_expr - Unhandled expression type or structure AFTER PAIR CHECKS: "); write_obj(expr); puts("");
+    // Fallback or error for unhandled expressions
+    reg error_val;
+    error_val.t = NIL; // Or a specific error type
+    return error_val;
+}
+
+reg primitive_plus(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_plus called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = FIXNUM;
+
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL) {
+        printf("ERROR: primitive '+': requires at least one argument\n");
+        exit(1);
+    }
+    reg arg1 = *(args_list_obj.car);
+
+    if (args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL) {
+        printf("ERROR: primitive '+': requires at least two arguments\n");
+        exit(1);
+    }
+    reg arg2 = *(args_list_obj.cdr->car);
+
+    // Check for more arguments (variadic + not yet supported, expect exactly two for now)
+    if (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL) {
+        printf("ERROR: primitive '+': only supports two arguments for now\n");
+        exit(1);
+    }
+
+    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
+        printf("ERROR: primitive '+': arguments must be FIXNUMs\n");
+        exit(1);
+    }
+
+    result.n = arg1.n + arg2.n;
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_plus result: %lld\n", result.n);
+    #endif
+    return result;
+}
+
+reg primitive_zero_p(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_zero_p called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = BOOLEAN;
+
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || 
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) {
+        printf("ERROR: primitive 'zero?': requires exactly one argument\n");
+        exit(1);
+    }
+    reg arg = *(args_list_obj.car);
+
+    if (arg.t != FIXNUM) {
+        printf("ERROR: primitive 'zero?': argument must be a FIXNUM\n");
+        exit(1);
+    }
+
+    result.b = (arg.n == 0);
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_zero_p result: %s\n", result.b ? "#t" : "#f");
+    #endif
+    return result;
+}
+
+reg primitive_multiply(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_multiply called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = FIXNUM;
+
+    // For now, let's implement for exactly two arguments like primitive_plus
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || 
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) {
+        printf("ERROR: primitive '*': requires exactly two arguments for now\n");
+        exit(1);
+    }
+    reg arg1 = *(args_list_obj.car);
+    reg arg2 = *(args_list_obj.cdr->car);
+
+    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
+        printf("ERROR: primitive '*': arguments must be FIXNUMs\n");
+        exit(1);
+    }
+
+    result.n = arg1.n * arg2.n;
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_multiply result: %lld\n", result.n);
+    #endif
+    return result;
+}
+
+reg primitive_sub1(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_sub1 called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = FIXNUM;
+
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || 
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) {
+        printf("ERROR: primitive 'sub1': requires exactly one argument\n");
+        exit(1);
+    }
+    reg arg = *(args_list_obj.car);
+
+    if (arg.t != FIXNUM) {
+        printf("ERROR: primitive 'sub1': argument must be a FIXNUM\n");
+        exit(1);
+    }
+
+    result.n = arg.n - 1;
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_sub1 result: %lld\n", result.n);
+    #endif
+    return result;
+}
+
+reg primitive_null_p(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_null_p called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = BOOLEAN;
+
+    // Expects (null? arg)
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { // Check for exactly one argument
+        printf("ERROR: primitive 'null?': requires exactly one argument\n");
+        exit(1);
+    }
+    reg arg = *(args_list_obj.car); // The actual argument to null?
+
+    result.b = (arg.t == NIL); // Check if the argument itself is the NIL object
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_null_p result: %s\n", result.b ? "#t" : "#f");
+    #endif
+    return result;
+}
+
+reg primitive_car(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_car called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    // Expects (car pair_arg)
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { // Check for exactly one argument
+        printf("ERROR: primitive 'car': requires exactly one argument\n");
+        exit(1);
+    }
+    reg pair_arg = *(args_list_obj.car); // The actual argument to car
+
+    if (pair_arg.t != PAIR) {
+        printf("ERROR: primitive 'car': argument must be a pair. Got: "); write_obj(pair_arg); puts("");
+        exit(1);
+    }
+    if (pair_arg.car == NULL) {
+         printf("ERROR: primitive 'car': pair has NULL car field.\n");
+         exit(1);
+    }
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_car result: "); write_obj(*(pair_arg.car)); puts("");
+    #endif
+    return *(pair_arg.car);
+}
+
+reg primitive_cdr(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_cdr called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    // Expects (cdr pair_arg)
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { // Check for exactly one argument
+        printf("ERROR: primitive 'cdr': requires exactly one argument\n");
+        exit(1);
+    }
+    reg pair_arg = *(args_list_obj.car); // The actual argument to cdr
+
+    if (pair_arg.t != PAIR) {
+        printf("ERROR: primitive 'cdr': argument must be a pair. Got: "); write_obj(pair_arg); puts("");
+        exit(1);
+    }
+    if (pair_arg.cdr == NULL) {
+         printf("ERROR: primitive 'cdr': pair has NULL cdr field.\n");
+         exit(1);
+    }
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_cdr result: "); write_obj(*(pair_arg.cdr)); puts("");
+    #endif
+    return *(pair_arg.cdr);
+}
+
+reg primitive_cons(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_cons called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    // Expects (cons arg1 arg2)
+    // args_list_obj should be a list of two arguments: ( (arg1_val) (arg2_val) )
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||           // arg1 must exist
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR ||    // list must continue for arg2
+        args_list_obj.cdr->car == NULL ||                               // arg2 must exist
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { // Must be exactly two args
+        printf("ERROR: primitive 'cons': requires exactly two arguments\n");
+        exit(1);
+    }
+
+    reg* result_pair_ptr = cons(args_list_obj.car, args_list_obj.cdr->car);
+    if (result_pair_ptr == NULL) { 
+        printf("ERROR: internal cons call returned NULL in primitive_cons\n");
+        exit(1);
+    }
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_cons result: "); write_obj(*result_pair_ptr); puts("");
+    #endif
+    return *result_pair_ptr; 
 }
 

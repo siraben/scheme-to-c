@@ -1,0 +1,1 @@
+(display ((lambda (x) ((lambda (x) (+ x 20)) (+ x 5))) 10)) 
