@@ -105,6 +105,7 @@ reg primitive_null_p(reg args_list_obj);
 reg primitive_car(reg args_list_obj);
 reg primitive_cdr(reg args_list_obj);
 reg primitive_cons(reg args_list_obj);
+reg primitive_less_than(reg args_list_obj); // Added Forward declaration
 
 reg *car(reg *head) {
   if(head->t == PAIR) {
@@ -339,50 +340,38 @@ void initialize_global_env() {
         reg* car_symbol = make_symbol("car");
         reg* cdr_symbol = make_symbol("cdr");
         reg* cons_symbol = make_symbol("cons");
+        reg* less_than_symbol = make_symbol("<"); // Added symbol
 
         // List of primitive procedure objects
         reg* plus_prim_obj = alloc_reg(); plus_prim_obj->t = PRIMITIVE_PROC;
-        plus_prim_obj->n = 0; plus_prim_obj->s = NULL; plus_prim_obj->car = NULL; plus_prim_obj->cdr = NULL;
-        plus_prim_obj->vars = NULL; plus_prim_obj->body = NULL; plus_prim_obj->env = NULL;
         plus_prim_obj->c_primitive_proc = primitive_plus;
 
         reg* zero_p_prim_obj = alloc_reg(); zero_p_prim_obj->t = PRIMITIVE_PROC;
-        zero_p_prim_obj->n = 0; zero_p_prim_obj->s = NULL; zero_p_prim_obj->car = NULL; zero_p_prim_obj->cdr = NULL;
-        zero_p_prim_obj->vars = NULL; zero_p_prim_obj->body = NULL; zero_p_prim_obj->env = NULL;
         zero_p_prim_obj->c_primitive_proc = primitive_zero_p;
 
         reg* multiply_prim_obj = alloc_reg(); multiply_prim_obj->t = PRIMITIVE_PROC;
-        multiply_prim_obj->n = 0; multiply_prim_obj->s = NULL; multiply_prim_obj->car = NULL; multiply_prim_obj->cdr = NULL;
-        multiply_prim_obj->vars = NULL; multiply_prim_obj->body = NULL; multiply_prim_obj->env = NULL;
         multiply_prim_obj->c_primitive_proc = primitive_multiply;
 
         reg* sub1_prim_obj = alloc_reg(); sub1_prim_obj->t = PRIMITIVE_PROC;
-        sub1_prim_obj->n = 0; sub1_prim_obj->s = NULL; sub1_prim_obj->car = NULL; sub1_prim_obj->cdr = NULL;
-        sub1_prim_obj->vars = NULL; sub1_prim_obj->body = NULL; sub1_prim_obj->env = NULL;
         sub1_prim_obj->c_primitive_proc = primitive_sub1;
 
         reg* null_p_prim_obj = alloc_reg(); null_p_prim_obj->t = PRIMITIVE_PROC;
-        null_p_prim_obj->n = 0; null_p_prim_obj->s = NULL; null_p_prim_obj->car = NULL; null_p_prim_obj->cdr = NULL;
-        null_p_prim_obj->vars = NULL; null_p_prim_obj->body = NULL; null_p_prim_obj->env = NULL;
         null_p_prim_obj->c_primitive_proc = primitive_null_p;
 
         reg* car_prim_obj = alloc_reg(); car_prim_obj->t = PRIMITIVE_PROC;
-        car_prim_obj->n = 0; car_prim_obj->s = NULL; car_prim_obj->car = NULL; car_prim_obj->cdr = NULL;
-        car_prim_obj->vars = NULL; car_prim_obj->body = NULL; car_prim_obj->env = NULL;
         car_prim_obj->c_primitive_proc = primitive_car;
 
         reg* cdr_prim_obj = alloc_reg(); cdr_prim_obj->t = PRIMITIVE_PROC;
-        cdr_prim_obj->n = 0; cdr_prim_obj->s = NULL; cdr_prim_obj->car = NULL; cdr_prim_obj->cdr = NULL;
-        cdr_prim_obj->vars = NULL; cdr_prim_obj->body = NULL; cdr_prim_obj->env = NULL;
         cdr_prim_obj->c_primitive_proc = primitive_cdr;
 
         reg* cons_prim_obj = alloc_reg(); cons_prim_obj->t = PRIMITIVE_PROC;
-        cons_prim_obj->n = 0; cons_prim_obj->s = NULL; cons_prim_obj->car = NULL; cons_prim_obj->cdr = NULL;
-        cons_prim_obj->vars = NULL; cons_prim_obj->body = NULL; cons_prim_obj->env = NULL;
         cons_prim_obj->c_primitive_proc = primitive_cons;
+        
+        reg* less_than_prim_obj = alloc_reg(); less_than_prim_obj->t = PRIMITIVE_PROC; // Added primitive object
+        less_than_prim_obj->c_primitive_proc = primitive_less_than;
 
         #ifdef DEBUG_VM
-        printf("DEBUG: Initialized primitive objects: + (%p), zero? (%p), * (%p), sub1 (%p), null? (%p), car (%p), cdr (%p), cons (%p)\n",
+        printf("DEBUG: Initialized primitive objects: + (%p), zero? (%p), * (%p), sub1 (%p), null? (%p), car (%p), cdr (%p), cons (%p), < (%p)\n",
                (void*)plus_prim_obj->c_primitive_proc,
                (void*)zero_p_prim_obj->c_primitive_proc,
                (void*)multiply_prim_obj->c_primitive_proc,
@@ -390,34 +379,36 @@ void initialize_global_env() {
                (void*)null_p_prim_obj->c_primitive_proc,
                (void*)car_prim_obj->c_primitive_proc,
                (void*)cdr_prim_obj->c_primitive_proc,
-               (void*)cons_prim_obj->c_primitive_proc);
+               (void*)cons_prim_obj->c_primitive_proc,
+               (void*)less_than_prim_obj->c_primitive_proc); // Added to debug print
         #endif
 
         reg* nil_ptr = alloc_reg(); nil_ptr->t = NIL;
 
-        // Construct the list of symbols: (cons cdr car null? sub1 * zero? +)
-        reg* prim_symbols = cons(plus_symbol, nil_ptr);      // (+)
-        prim_symbols = cons(zero_p_symbol, prim_symbols);    // (zero? +)
-        prim_symbols = cons(multiply_symbol, prim_symbols);  // (* zero? +)
-        prim_symbols = cons(sub1_symbol, prim_symbols);      // (sub1 * zero? +)
-        prim_symbols = cons(null_p_symbol, prim_symbols);    // (null? sub1 * zero? +)
-        prim_symbols = cons(car_symbol, prim_symbols);       // (car null? sub1 * zero? +)
-        prim_symbols = cons(cdr_symbol, prim_symbols);       // (cdr car null? sub1 * zero? +)
-        prim_symbols = cons(cons_symbol, prim_symbols);      // (cons cdr car null? sub1 * zero? +)
+        // Construct the list of symbols
+        reg* prim_symbols = cons(plus_symbol, nil_ptr);
+        prim_symbols = cons(zero_p_symbol, prim_symbols);
+        prim_symbols = cons(multiply_symbol, prim_symbols);
+        prim_symbols = cons(sub1_symbol, prim_symbols);
+        prim_symbols = cons(null_p_symbol, prim_symbols);
+        prim_symbols = cons(car_symbol, prim_symbols);
+        prim_symbols = cons(cdr_symbol, prim_symbols);
+        prim_symbols = cons(cons_symbol, prim_symbols);
+        prim_symbols = cons(less_than_symbol, prim_symbols); // Added symbol to list
 
-
-        // Construct the list of values (primitive objects): (#<cons_obj> #<cdr_obj> #<car_obj> #<null_obj> #<sub1_obj> #<mul_obj> #<zero_obj> #<plus_obj>)
-        reg* prim_values = cons(plus_prim_obj, nil_ptr);       // (#<plus_obj>)
-        prim_values = cons(zero_p_prim_obj, prim_values);      // (#<zero_obj> #<plus_obj>)
-        prim_values = cons(multiply_prim_obj, prim_values);    // (#<mul_obj> #<zero_obj> #<plus_obj>)
-        prim_values = cons(sub1_prim_obj, prim_values);        // (#<sub1_obj> #<mul_obj> #<zero_obj> #<plus_obj>)
-        prim_values = cons(null_p_prim_obj, prim_values);      // (#<null?> #<sub1_obj> ...)
-        prim_values = cons(car_prim_obj, prim_values);         // (#<car_obj> #<null?> ...)
-        prim_values = cons(cdr_prim_obj, prim_values);         // (#<cdr_obj> #<car_obj> ...)
-        prim_values = cons(cons_prim_obj, prim_values);        // (#<cons_obj> #<cdr_obj> ...)
+        // Construct the list of values
+        reg* prim_values = cons(plus_prim_obj, nil_ptr);
+        prim_values = cons(zero_p_prim_obj, prim_values);
+        prim_values = cons(multiply_prim_obj, prim_values);
+        prim_values = cons(sub1_prim_obj, prim_values);
+        prim_values = cons(null_p_prim_obj, prim_values);
+        prim_values = cons(car_prim_obj, prim_values);
+        prim_values = cons(cdr_prim_obj, prim_values);
+        prim_values = cons(cons_prim_obj, prim_values);
+        prim_values = cons(less_than_prim_obj, prim_values); // Added value to list
 
         reg* global_frame = cons(prim_symbols, prim_values);
-        env = cons(global_frame, nil_ptr); // env = ( ( (sub1 * zero? +) . (#<sub1> #<mult> #<zero?> #<+>) ) . () )
+        env = cons(global_frame, nil_ptr);
 
         #ifdef DEBUG_VM
         printf("DEBUG: Global env initialized. Env = "); write_obj(*env); puts("");
@@ -840,6 +831,181 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             }
         }
 
+        // LET: (let ((var1 init1) ... (varN initN)) body1 ... bodyM)
+        // Implements parallel binding (all inits evaluated in current_eval_env first)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "let")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - LET: "); write_obj(expr); puts("");
+            #endif
+
+            // Structure check: (let <bindings> <body1> ...)
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL ||        // Missing <bindings>
+                expr.cdr->cdr == NULL || expr.cdr->cdr->t != PAIR || expr.cdr->cdr->car == NULL) { // Missing <body1>
+                printf("ERROR: Malformed let expression - expected (let <bindings> <body1> ...)\\n");
+                exit(1);
+            }
+
+            reg* bindings_list_ptr = expr.cdr->car;      // cadr(expr)
+            reg* body_forms_ptr = expr.cdr->cdr;       // cddr(expr)
+
+            if (bindings_list_ptr->t != PAIR && bindings_list_ptr->t != NIL) { // Bindings can be '()
+                printf("ERROR: let bindings must be a list.\\n");
+                exit(1);
+            }
+
+            reg* let_param_symbols_rev = alloc_reg(); let_param_symbols_rev->t = NIL;
+            reg* let_arg_values_rev = alloc_reg();    let_arg_values_rev->t = NIL;
+
+            // Step 1 & 2: Evaluate all init expressions in the *current* environment
+            // and collect param symbols and evaluated arg values (in reverse order)
+            reg* current_binding_node = bindings_list_ptr;
+            while(current_binding_node != NULL && current_binding_node->t == PAIR) {
+                if (current_binding_node->car == NULL || current_binding_node->car->t != PAIR) {
+                    printf("ERROR: Malformed let binding - expected list of (var init) pairs.\\n"); exit(1);
+                }
+                reg* binding_pair_ptr = current_binding_node->car; // (var init)
+
+                if (binding_pair_ptr->car == NULL || binding_pair_ptr->car->t != SYMBOL || // var must be a symbol
+                    binding_pair_ptr->cdr == NULL || binding_pair_ptr->cdr->t != PAIR || // init must exist as a list element
+                    binding_pair_ptr->cdr->car == NULL || // actual init expression
+                    (binding_pair_ptr->cdr->cdr != NULL && binding_pair_ptr->cdr->cdr->t != NIL) // binding pair must be (var init) exactly
+                    ) {
+                    printf("ERROR: Malformed let binding pair - expected (var init-expr).\\n"); exit(1);
+                }
+                reg* var_symbol_ptr = binding_pair_ptr->car; // This is reg* to the symbol
+                reg init_expr = *(binding_pair_ptr->cdr->car); // This is the init expression (reg)
+
+                reg evaluated_init_val = eval_scheme_expr(init_expr, current_eval_env);
+                reg* evaluated_init_val_ptr = alloc_reg(); // cons needs reg*
+                memcpy(evaluated_init_val_ptr, &evaluated_init_val, sizeof(reg));
+
+                let_param_symbols_rev = cons(var_symbol_ptr, let_param_symbols_rev);
+                let_arg_values_rev = cons(evaluated_init_val_ptr, let_arg_values_rev);
+
+                current_binding_node = current_binding_node->cdr;
+            }
+            if (current_binding_node != NULL && current_binding_node->t != NIL) { // Check for improper bindings list
+                 printf("ERROR: Malformed let bindings list - improper list.\\n"); exit(1);
+            }
+
+            // Step 3: Reverse the collected lists to get correct order for the frame
+            reg* final_let_param_symbols = alloc_reg(); final_let_param_symbols->t = NIL;
+            reg* p_sym_iter = let_param_symbols_rev;
+            while (p_sym_iter != NULL && p_sym_iter->t == PAIR) {
+                final_let_param_symbols = cons(p_sym_iter->car, final_let_param_symbols);
+                p_sym_iter = p_sym_iter->cdr;
+            }
+
+            reg* final_let_arg_values = alloc_reg(); final_let_arg_values->t = NIL;
+            reg* p_val_iter = let_arg_values_rev;
+            while (p_val_iter != NULL && p_val_iter->t == PAIR) {
+                final_let_arg_values = cons(p_val_iter->car, final_let_arg_values);
+                p_val_iter = p_val_iter->cdr;
+            }
+            
+            // Step 4 & 5: Create new frame and extend environment
+            reg* new_let_frame = cons(final_let_param_symbols, final_let_arg_values);
+            reg* eval_env_for_let_body = cons(new_let_frame, current_eval_env);
+
+            // Step 6: Evaluate body forms (like a 'begin' block)
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - LET evaluating body forms. New env: "); 
+            if(eval_env_for_let_body) write_obj(*eval_env_for_let_body); else printf("(null env for let body!)"); 
+            puts("");
+            #endif
+            
+            if (body_forms_ptr == NULL || body_forms_ptr->t == NIL) { // (let (...) ) -- no body forms
+                 // R5RS says result is unspecified. Some Schemes return last val of bindings, some NIL.
+                 // For (let () body), body is evaluated. If (let bindings) and bindings is non-empty,
+                 // but body_forms_ptr is NIL, it's like (let ((a 1)) /*unspecified*/).
+                 // Let's return NIL for an empty body list, consistent with an empty (begin).
+                #ifdef DEBUG_VM
+                printf("DEBUG: eval_scheme_expr - LET with no body forms, returning NIL\\n");
+                #endif
+                reg nil_val; nil_val.t = NIL;
+                return nil_val;
+            }
+
+            reg let_last_val; 
+            let_last_val.t = NIL; 
+            int let_evaluated_at_least_one = 0;
+            reg* current_let_body_node = body_forms_ptr;
+
+            while(current_let_body_node != NULL && current_let_body_node->t == PAIR) {
+                if (current_let_body_node->car == NULL) { 
+                    printf("ERROR: Malformed let body - null expression.\\n"); exit(1); 
+                }
+                let_last_val = eval_scheme_expr(*(current_let_body_node->car), eval_env_for_let_body);
+                let_evaluated_at_least_one = 1;
+                current_let_body_node = current_let_body_node->cdr;
+            }
+            if (current_let_body_node != NULL && current_let_body_node->t != NIL) { // Check for improper body list
+                printf("ERROR: Malformed let body - improper list.\\n"); exit(1);
+            }
+            
+            if (!let_evaluated_at_least_one ) { 
+                 // This case should ideally be covered if body_forms_ptr was NIL initially.
+                 // If body_forms_ptr was PAIR but led to no evaluations (e.g. if it was '(#t) - not a list of exprs)
+                 // then let_last_val would remain NIL.
+                 #ifdef DEBUG_VM
+                 printf("DEBUG: eval_scheme_expr - LET body forms did not evaluate to anything, returning last val (NIL if empty body effectively)\\n");
+                 #endif
+            }
+            return let_last_val;
+        }
+
+        // OR: (or expr1 expr2 ...)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "or")) {
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - OR: "); write_obj(expr); puts("");
+            #endif
+
+            reg* current_arg_node = expr.cdr; // List of argument expressions
+            reg false_val; false_val.t = BOOLEAN; false_val.b = 0;
+
+            if (current_arg_node == NULL || current_arg_node->t == NIL) { // (or) -> #f
+                #ifdef DEBUG_VM
+                printf("DEBUG: eval_scheme_expr - (or) with no arguments, returning #f\\n");
+                #endif
+                return false_val;
+            }
+
+            if (current_arg_node->t != PAIR) {
+                 printf("ERROR: Malformed or expression - arguments not a proper list.\\n"); exit(1);
+            }
+
+            while(current_arg_node != NULL && current_arg_node->t == PAIR) {
+                if (current_arg_node->car == NULL) {
+                    printf("ERROR: Malformed or - null expression in arguments.\\n"); exit(1);
+                }
+                reg arg_val = eval_scheme_expr(*(current_arg_node->car), current_eval_env);
+                
+                int is_true = 1; // In Scheme, any value other than #f is true.
+                if (arg_val.t == BOOLEAN && arg_val.b == 0) {
+                    is_true = 0;
+                }
+
+                if (is_true) {
+                    #ifdef DEBUG_VM
+                    printf("DEBUG: eval_scheme_expr - OR found true value: "); write_obj(arg_val); puts("");
+                    #endif
+                    return arg_val; // Return the first true value
+                }
+                current_arg_node = current_arg_node->cdr;
+            }
+            // Check if the argument list was proper
+            if (current_arg_node != NULL && current_arg_node->t != NIL) {
+                printf("ERROR: Malformed or expression - improper list of argument expressions\\n");
+                exit(1);
+            }
+
+            // All arguments evaluated to #f, or list was exhausted
+            #ifdef DEBUG_VM
+            printf("DEBUG: eval_scheme_expr - OR all arguments were false, returning #f\\n");
+            #endif
+            return false_val;
+        }
+
         // LAMBDA: (lambda (param...) body-expr)
         // For now, assumes lambda has exactly one body expression.
         // R5RS allows multiple, which acts like an implicit (begin ...)
@@ -857,8 +1023,8 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
                 exit(1);
             }
 
-            reg* params_list_ptr = expr.cdr->car;  // cadr(expr) - already a reg*
-            reg* body_expr_ptr = expr.cdr->cdr->car; // caddr(expr) - already a reg*
+            reg* params_list_ptr = expr.cdr->car;  // cadr(expr)
+            reg* body_expr_ptr = expr.cdr->cdr->car; // caddr(expr)
 
             // Params list should be a list of symbols or NIL for lambda ()
             if (params_list_ptr->t != PAIR && params_list_ptr->t != NIL) {
@@ -1231,5 +1397,34 @@ reg primitive_cons(reg args_list_obj) {
     printf("DEBUG: primitive_cons result: "); write_obj(*result_pair_ptr); puts("");
     #endif
     return *result_pair_ptr; 
+}
+
+reg primitive_less_than(reg args_list_obj) {
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_less_than called with args: "); write_obj(args_list_obj); puts("");
+    #endif
+    reg result;
+    result.t = BOOLEAN;
+
+    // Expects (< arg1 arg2)
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) {
+        printf("ERROR: primitive '<': requires exactly two arguments\\n");
+        exit(1);
+    }
+    reg arg1 = *(args_list_obj.car);
+    reg arg2 = *(args_list_obj.cdr->car);
+
+    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
+        printf("ERROR: primitive '<': arguments must be FIXNUMs\\n");
+        exit(1);
+    }
+
+    result.b = (arg1.n < arg2.n);
+    #ifdef DEBUG_VM
+    printf("DEBUG: primitive_less_than result: %s\\n", result.b ? "#t" : "#f");
+    #endif
+    return result;
 }
 

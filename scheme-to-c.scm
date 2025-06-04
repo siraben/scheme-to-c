@@ -113,7 +113,8 @@
 (define (emit-display x)
   (emit-expr (car x)) ; Evaluate the expression to be displayed
   (emit "display_obj(eax)") ; Display the value in eax
-  (emit "puts(\"\")"))
+  (emit "printf(\"\\n\")")
+  (emit "fflush(stdout)")) ; Ensure it's written out
 
 (define (emit-eq x)
   (let ((a (car x)) (b (cadr x)))
@@ -303,6 +304,8 @@
 (define (emit-expr x)
   (cond ((immediate? x)
          (emit-immediate x))
+        ((string? x)
+         (emit "eax = *make_string(\"~a\");" x))
         ((atom? x)
          (if (null? x) ; nil is an atom and an immediate
              (emit-immediate x)
@@ -494,14 +497,12 @@
   (emit "eax = *cons(&eax, &ebx)"))
 
 (define (emit-quote x)
-  (if (null? x)
-      (emit "eax.t = NIL")
-      (cond ((symbol? x)
-             (emit "eax = *make_symbol(\"~s\")" x))
-            ((pair? x)
-             (emit-quoted-list x))
-            ((immediate? x)
-             (emit-immediate x)))))
+  (cond ((null? x) (emit "eax.t = NIL"))
+        ((string? x) (emit "eax = *make_string(\"~a\");" x))
+        ((symbol? x) (emit "eax = *make_symbol(\"~a\");" x))
+        ((pair? x) (emit-quoted-list x))
+        ((immediate? x) (emit-immediate x))
+        (else (error 'emit-quote "Attempted to quote an unsupported type" x))))
 
 (define (emit-let x)
   (let ((varlist (car x))
