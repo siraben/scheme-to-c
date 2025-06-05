@@ -34,8 +34,10 @@ The compiler runs a series of small passes. Each pass rewrites a single syntacti
 4. **desugar_letrec** – lower `letrec` to a `let` with placeholder bindings and `set!` assignments.
 5. **desugar_letstar** – expand `let*` into chained `let` expressions.
 6. **desugar_let** – translate `let` into an immediate lambda application.
+7. **expand_quasiquote** – turn backquoted expressions into combinations of `cons`, `append` and `quote`.
+8. **desugar_cond** – translate `cond` clauses into nested `if` expressions.
 
-After these passes the intermediate language consists only of core forms such as `lambda`, `if`, `begin`, `set!`, `cond`, literals and procedure calls. C code is finally generated that links against `vm.c` which provides the runtime system and uses the Boehm GC.
+After these passes the intermediate language consists only of core forms such as `lambda`, `if`, `begin`, `set!`, user supplied `label`/`goto`, literals and procedure calls. C code is finally generated that links against `vm.c` which provides the runtime system and uses the Boehm GC.
 
 Running tests
 -------------
@@ -62,7 +64,6 @@ Grammar of input language
          (let* ((<sym> <expr>) ...) <expr>)
          (letrec ((<sym> <expr>) ...) <expr>)
          (set! <sym> <expr>)
-         (cond (<expr> <expr> ...) ...)
          (label <sym>)
          (goto <sym>)
          (<expr> <expr> ...)

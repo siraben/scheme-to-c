@@ -160,6 +160,43 @@ class SchemeToC:
             return []
         return expr
 
+    def pass_expand_quasiquote(self, expr: Any) -> Any:
+        """Expand `quasiquote` expressions eagerly."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
+            if op == 'quasiquote':
+                return self.expand_quasiquote(args[0])
+            return [op] + [self.pass_expand_quasiquote(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def _desugar_cond_clauses(self, clauses: List[Any]) -> Any:
+        if not clauses:
+            return False
+        first, *rest = clauses
+        if not first:
+            return self._desugar_cond_clauses(rest)
+        pred, *body = first
+        if isinstance(pred, str) and pred == 'else':
+            body_ds = [self.pass_desugar_cond(b) for b in body]
+            return body_ds[0] if len(body_ds) == 1 else ['begin'] + body_ds
+        body_ds = [self.pass_desugar_cond(b) for b in body]
+        conseq = body_ds[0] if len(body_ds) == 1 else ['begin'] + body_ds
+        alt = self._desugar_cond_clauses(rest)
+        return ['if', self.pass_desugar_cond(pred), conseq, alt]
+
+    def pass_desugar_cond(self, expr: Any) -> Any:
+        """Rewrite `cond` into nested `if` expressions."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
+            if op == 'cond':
+                return self._desugar_cond_clauses(args)
+            return [op] + [self.pass_desugar_cond(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
     def pass_lift_internal_defines(self, expr: Any) -> Any:
         """Convert internal defines inside lambdas into letrec bindings."""
         if isinstance(expr, list) and expr:
@@ -178,9 +215,11 @@ class SchemeToC:
     def apply_passes(self, expr: Any) -> Any:
         """Run all compiler passes on the expression AST."""
         expr = self.pass_lift_internal_defines(expr)
+        expr = self.pass_expand_quasiquote(expr)
         expr = self.pass_desugar_or(expr)
         expr = self.pass_desugar_and(expr)
         expr = self.pass_desugar_letrec(expr)
+        expr = self.pass_desugar_cond(expr)
         expr = self.pass_desugar_letstar(expr)
         expr = self.pass_desugar_let(expr)
         return expr
@@ -343,12 +382,6 @@ class SchemeToC:
             elif op == 'goto': self.emit_goto(args[0])
             elif op == 'exit': self.emit_exit(args[0])
             elif op == 'cond': self.emit_cond(args)
-            elif op == 'or':
-                expanded = self._desugar_or(args)
-                self.emit_expr(expanded)
-            elif op == 'and':
-                expanded = self._desugar_and(args)
-                self.emit_expr(expanded)
             else:
                 self.emit_apply(x)
         elif self.is_null(x): 
