@@ -7,7 +7,6 @@ class SchemeToC:
         self.gensym_count: int = 0
         self.nesting_level: int = 0
         self.name_map: Dict[str, str] = {}
-        self.local_env_stack: List[Dict[str, str]] = []
 
     def set_compile_port(self, p: TextIO) -> None:
         if not hasattr(p, 'write'):
@@ -66,115 +65,12 @@ class SchemeToC:
         self.gensym_count += 1
         return f"label{self.gensym_count}"
 
-    def fresh_local(self, base: str) -> str:
-        return f"lv_{base}_{self.gensym_count}_{len(self.local_env_stack)}"
-
-    def lookup_local(self, name: str) -> Optional[str]:
-        for scope in reversed(self.local_env_stack):
-            if name in scope:
-                return scope[name]
-        return None
 
     def gensym_scheme_var(self) -> str:
         """Generate a unique Scheme variable name for desugaring."""
         self.gensym_count += 1
         return f"g{self.gensym_count}"
 
-    def _free_vars(self, expr: Any, bound: Optional[set] = None) -> set:
-        if bound is None:
-            bound = set()
-        free: set = set()
-
-        def visit(e: Any, env: set) -> None:
-            if isinstance(e, list) and e:
-                op = e[0]
-                if op == 'lambda':
-                    params = e[1]
-                    param_set = set(params if isinstance(params, list) else [params])
-                    new_env = env | param_set
-                    for b in e[2:]:
-                        visit(b, new_env)
-                elif op == 'let':
-                    binds = e[1]
-                    bind_vars = {v for v, _ in binds}
-                    for _, val in binds:
-                        visit(val, env)
-                    for b in e[2:]:
-                        visit(b, env | bind_vars)
-                else:
-                    for sub in e:
-                        visit(sub, env)
-            elif isinstance(e, list):
-                for sub in e:
-                    visit(sub, env)
-            elif isinstance(e, str):
-                if e not in env:
-                    free.add(e)
-
-        visit(expr, bound)
-        return free
-
-    def _captured_vars(self, expr: Any, bound: Optional[set] = None) -> set:
-        if bound is None:
-            bound = set()
-        captured: set = set()
-
-        if isinstance(expr, list) and expr:
-            op = expr[0]
-            if op == 'lambda':
-                params = expr[1]
-                param_set = set(params if isinstance(params, list) else [params])
-                free_in_body: set = set()
-                for sub in expr[2:]:
-                    free_in_body |= self._free_vars(sub, param_set)
-                captured |= free_in_body & bound
-                new_env = bound | param_set
-                for b in expr[2:]:
-                    captured |= self._captured_vars(b, new_env)
-            elif op == 'let':
-                binds = expr[1]
-                bind_vars = {v for v, _ in binds}
-                for _, val in binds:
-                    captured |= self._captured_vars(val, bound)
-                new_env = bound | bind_vars
-                for b in expr[2:]:
-                    captured |= self._captured_vars(b, new_env)
-            else:
-                for sub in expr:
-                    captured |= self._captured_vars(sub, bound)
-        return captured
-
-    def _mutated_vars(self, expr: Any) -> set:
-        mutated: set = set()
-
-        if isinstance(expr, list) and expr:
-            op = expr[0]
-            if op == 'set!':
-                target = expr[1]
-                if isinstance(target, str):
-                    mutated.add(target)
-                mutated |= self._mutated_vars(expr[2])
-            elif op == 'lambda':
-                for b in expr[2:]:
-                    mutated |= self._mutated_vars(b)
-            elif op == 'let':
-                binds = expr[1]
-                for _, val in binds:
-                    mutated |= self._mutated_vars(val)
-                for b in expr[2:]:
-                    mutated |= self._mutated_vars(b)
-            else:
-                for sub in expr:
-                    mutated |= self._mutated_vars(sub)
-        return mutated
-
-    def _let_requires_closure(self, let_expr: List[Any]) -> bool:
-        bindings = let_expr[1]
-        body = let_expr[2]
-        bind_vars = {v for v, _ in bindings}
-        captured = self._captured_vars(body, bind_vars)
-        mutated = self._mutated_vars(body)
-        return bool(captured & bind_vars) or bool(mutated & bind_vars)
 
     def _desugar_or(self, args: List[Any]) -> Any:
         if not args:
@@ -340,14 +236,9 @@ class SchemeToC:
         if self.is_immediate(x):
             self.emit_immediate(x)
         elif isinstance(x, str):
-            local_name = self.lookup_local(x)
-            if local_name is not None:
-                self.emit("// Using local variable {}", x)
-                self.emit("eax = {}", local_name)
-            else:
-                self.emit("// Variable lookup for scheme symbol: {}", x)
-                self.emit("eax = *make_symbol(\"{}\")", x)
-                self.emit_no_colon("lookup_in_env(env); // Result of lookup will be in eax")
+            self.emit("// Variable lookup for scheme symbol: {}", x)
+            self.emit("eax = *make_symbol(\"{}\")", x)
+            self.emit_no_colon("lookup_in_env(env); // Result of lookup will be in eax")
         elif isinstance(x, list) and x: 
             op = x[0]
             args = x[1:]
@@ -585,54 +476,16 @@ class SchemeToC:
             self.emit("// End defining simple global {}", var_name_str)
 
     def emit_let(self, args_list: List[Any]) -> None:
-        var_bindings = args_list[0]
-        body_parts = args_list[1:]
-        body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
-
-        let_expr = ['let', var_bindings, body_expr]
-        if self._let_requires_closure(let_expr):
-            self.emit_no_colon("{{ // Start LET scope (closure)")
-            self.nesting_level += 1
-            for var_name_str, val_expr in var_bindings:
-                self.emit_define_var([var_name_str, val_expr])
-            self.emit_expr(body_expr)
-            self.nesting_level -= 1
-            self.emit_no_colon("}} // End LET scope")
-        else:
-            self.emit_no_colon("{{ // Start LET scope (locals)")
-            self.nesting_level += 1
-            local_scope: Dict[str, str] = {}
-            self.local_env_stack.append(local_scope)
-            for var_name_str, val_expr in var_bindings:
-                local_name = f"lv_{self.gensym()}"
-                local_scope[var_name_str] = local_name
-                self.emit("reg {}", local_name)
-                self.emit_expr(val_expr)
-                self.emit("{} = eax", local_name)
-            self.emit_expr(body_expr)
-            self.local_env_stack.pop()
-            self.nesting_level -= 1
-            self.emit_no_colon("}} // End LET scope")
+        expanded = self._desugar_expr(['let', *args_list])
+        self.emit_expr(expanded)
 
     def emit_let_star(self, args_list: List[Any]) -> None:
-        bindings = args_list[0]
-        body_parts = args_list[1:]
-        body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
-        expr = body_expr
-        for var, val in reversed(bindings):
-            expr = ['let', [[var, val]], expr]
-        self.emit_expr(expr)
+        expanded = self._desugar_expr(['let*', *args_list])
+        self.emit_expr(expanded)
 
     def emit_letrec(self, args_list: List[Any]) -> None:
-        bindings = args_list[0]
-        body_parts = args_list[1:]
-        placeholder = ['quote', []]
-        let_bindings = [[var, placeholder] for var, _ in bindings]
-        set_forms = [['set!', var, val] for var, val in bindings]
-        body_core_forms = set_forms + body_parts
-        body_expr = body_core_forms[0] if len(body_core_forms) == 1 else ['begin'] + body_core_forms
-        expr = ['let', let_bindings, body_expr]
-        self.emit_expr(expr)
+        expanded = self._desugar_expr(['letrec', *args_list])
+        self.emit_expr(expanded)
 
     def emit_quote(self, x: Any) -> None:
         if self.is_null(x):
@@ -744,18 +597,13 @@ class SchemeToC:
         body_expr = args_list[1]
 
         if isinstance(var_name_str, str):
-            local_name = self.lookup_local(var_name_str)
-            if local_name is not None:
-                self.emit_expr(body_expr)
-                self.emit("{} = eax", local_name)
-            else:
-                self.emit_expr(body_expr)
-                temp = f"tmp_{self.gensym()}"
-                self.emit(f"reg {temp} = eax")
-                self.emit(f"ebx = {temp}")
-                self.emit("eax = *make_symbol(\"{}\")", var_name_str)
-                self.emit("set_var_in_env(env)")
-                self.emit(f"eax = {temp}")
+            self.emit_expr(body_expr)
+            temp = f"tmp_{self.gensym()}"
+            self.emit(f"reg {temp} = eax")
+            self.emit(f"ebx = {temp}")
+            self.emit("eax = *make_symbol(\"{}\")", var_name_str)
+            self.emit("set_var_in_env(env)")
+            self.emit(f"eax = {temp}")
         else:
             self.emit_no_colon("// SET! target is not a symbol: {}", var_name_str)
 
