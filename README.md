@@ -73,91 +73,48 @@ Example use
 
 ``` scheme
 (begin
-  (define a (quote (a b c d e)))
-  (define b (quote ()))
-  (label start)
-  (if (null? a)
-      (goto end)
-      (begin (set! b (cons (car a) b))
-             (display a)
-             (set! a (cdr a))
-             (goto start)))
-  (label end)
-  (display b))
+  (define (factorial n)
+    (if (= n 0)
+        1
+        (* n (factorial (- n 1)))))
+
+  (display (factorial 6)))
 ```
 
 Output
 ------
 
 ``` c
-// Skipping ~ 200 lines of helper code
+// -- END GENERATED C PREAMBLE --
 int main(void)
 {
+initialize_global_env();
 GC_INIT();
-eax = *make_symbol("a");
-push();
-eax = *make_symbol("b");
-push();
-eax = *make_symbol("c");
-push();
-eax = *make_symbol("d");
-push();
-eax = *make_symbol("e");
-push();
+// Defining potentially recursive function factorial as ['if', ['=', 'n', 0], 1, ['*', 'n', ['factorial', ['-', 'n', 1]]]];
+reg* v_0_storage = alloc_reg();;
+reg quoted_params_val_for_v_0;;
+reg quoted_body_val_for_v_0;;
+eax = *make_symbol("n");;
+reg tmp_label1 = eax;
 eax.t = NIL;
 ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-reg a = eax;
-eax.t = NIL;
-reg b = eax;
-start:
-eax = a;
-al = (eax.t == NIL);
-eax.t = BOOLEAN;
-eax.b = al;
-if (!eax.b){goto label2;};
-goto end;
-goto label1;
-label2:;
-eax = a;
-eax = *car(&eax);
-push();
-eax = b;
-ebx = eax;
-pop();
-eax = *cons(&eax, &ebx);
-b = eax;
-print((a));
-puts("");
-eax = a;
-eax = *cdr(&eax);
-a = eax;
-goto start;
-label1:;
-;
-end:
-print((b));
-puts("");
+eax = *cons(&tmp_label1, &ebx);
+quoted_params_val_for_v_0 = eax;;
+eax = *make_symbol("if");;
+reg tmp_label2 = eax;
+...
+tmp_label18 = *cons(&ebx, &tmp_label18);
+eax = apply_closure(tmp_label17, tmp_label18);
+} // End APPLY scope
+display_obj(eax);
+fflush(stdout);
 }
 ```
 
 Running the code results in:
 
 ```
-(e d c b a)
+720
 ```
 Project Goals
 -------------
