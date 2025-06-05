@@ -325,7 +325,6 @@ class SchemeToC:
             self.emit("// Defining potentially recursive function {} as {}", var_name_str, repr(actual_body))
             # Storage for the C variable that will hold the closure reg struct.
             # This is distinct from _storage which holds the reg struct itself if allocated separately.
-            self.emit("reg {}_c_var; // C host variable for the closure", c_var_name)
             # Storage for the closure reg struct itself, to allow self-reference.
             self.emit("reg* {}_storage = alloc_reg();", c_var_name)
 
@@ -349,15 +348,14 @@ class SchemeToC:
             self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg));", c_var_name, c_var_name)
             
             self.emit("// 3. Add this closure (now in *{}_storage) to the global environment under its name '{}'.", c_var_name, scheme_var_name)
-            self.emit("{}_c_var = *{}_storage; // Load the closure struct value into the C host var", c_var_name, c_var_name)
             self.emit_add_var_to_global_vm_env_ptr(scheme_var_name, f"{c_var_name}_storage")
             
             if is_top_level:
                 self.emit("{}_storage->env = NULL;", c_var_name)
-                self.emit("{}_c_var.env = NULL;", c_var_name)
+                pass
             else:
                 self.emit("{}_storage->env = env;", c_var_name)
-                self.emit("{}_c_var.env = env;", c_var_name)
+                pass
 
             self.emit("// End defining {}", var_name_str)
         else: 
@@ -372,8 +370,7 @@ class SchemeToC:
             # This means a C variable var_c_var is created and initialized from eax,
             # but "eax" (containing the same value) is passed to add_to_env.
             # So env gets a copy of the value, not a reference to var_c_var.
-            self.emit("reg {}_c_var = eax; // C host variable (optional, for inspection)", c_var_name)
-            self.emit_add_var_to_global_vm_env(scheme_var_name, "eax") 
+            self.emit_add_var_to_global_vm_env(scheme_var_name, "eax")
             self.emit("// End defining simple global {}", var_name_str)
 
     def emit_let(self, args_list: List[Any]) -> None:
