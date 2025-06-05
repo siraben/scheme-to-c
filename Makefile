@@ -62,3 +62,24 @@ test: vm.o
 
 # Add vm.o to the default target dependencies if it isn't rebuilt every time by the test target logic
 # $(EXE): $(OBJS) $(HDRS) Makefile vm.o # Assuming vm.o is built as part of $(OBJS)
+
+.PHONY: python-test
+python-test: vm.o
+	@echo "Running tests with Python compiler..."
+	@mkdir -p tests/output # Ensure output directory exists
+	@for test_base_name in $(TEST_BASE_NAMES); do \
+		echo "----------------------------------------"; \
+		echo "Running test (Python): test_$$test_base_name"; \
+		python3 scheme_to_c.py tests/test_$$test_base_name.scm tests/output/test_$$test_base_name.c ; \
+		$(CC) $(CFLAGS) -o tests/output/test_$$test_base_name_runner tests/output/test_$$test_base_name.c vm.o $(LIBS) ; \
+		./tests/output/test_$$test_base_name_runner | perl -pe 's/\r?\n?$$//' > tests/output/test_$$test_base_name.actual ; \
+		if diff -w -u tests/test_$$test_base_name.expected tests/output/test_$$test_base_name.actual; then \
+			echo "PASS (Python): test_$$test_base_name"; \
+		else \
+			echo "FAIL (Python): test_$$test_base_name. See diff below."; \
+			diff -w -u tests/test_$$test_base_name.expected tests/output/test_$$test_base_name.actual; \
+			# exit 1; # Uncomment to stop on first failure \
+		fi ; \
+	done
+	@echo "----------------------------------------"
+	@echo "Python test run complete."
