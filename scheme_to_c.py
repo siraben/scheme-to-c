@@ -114,6 +114,44 @@ class SchemeToC:
                 fvs |= self._free_vars(val, bound)
             fvs |= self._free_vars(body_expr, new_bound)
             return fvs
+        elif op == 'let*':
+            bindings = expr[1]
+            body_exprs = expr[2:]
+            new_bound = bound
+            fvs = set()
+            for var, val in bindings:
+                fvs |= self._free_vars(val, new_bound)
+                new_bound = new_bound | {var}
+            for b in body_exprs:
+                fvs |= self._free_vars(b, new_bound)
+            return fvs
+        elif op == 'letrec':
+            bindings = expr[1]
+            body_exprs = expr[2:]
+            new_bound = bound | {var for var, _ in bindings}
+            fvs = set()
+            for _, val in bindings:
+                fvs |= self._free_vars(val, new_bound)
+            for b in body_exprs:
+                fvs |= self._free_vars(b, new_bound)
+            return fvs
+        elif op == 'if':
+            return (self._free_vars(expr[1], bound) |
+                    self._free_vars(expr[2], bound) |
+                    self._free_vars(expr[3], bound))
+        elif op == 'begin':
+            fvs = set()
+            for b in expr[1:]:
+                fvs |= self._free_vars(b, bound)
+            return fvs
+        elif op == 'set!':
+            var = expr[1]
+            val = expr[2]
+            fvs = set()
+            if var not in bound:
+                fvs.add(var)
+            fvs |= self._free_vars(val, bound)
+            return fvs
         elif op == 'define':
             definition = expr[1]
             body = expr[2]
@@ -706,7 +744,29 @@ class SchemeToC:
             return ['lambda', params] + body
         elif op == 'let':
             bindings = [[var, self._anf(val)] for var, val in expr[1]]
-            return ['let', bindings, self._anf(expr[2])]
+            body_parts = [self._anf(e) for e in expr[2:]]
+            if len(body_parts) == 1:
+                body_expr = body_parts[0]
+            else:
+                body_expr = ['begin'] + body_parts
+            return ['let', bindings, body_expr]
+        elif op == 'let*':
+            bindings = expr[1]
+            body_parts = expr[2:]
+            body_core = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+            result = body_core
+            for var, val in reversed(bindings):
+                result = ['let', [[var, val]], result]
+            return self._anf(result)
+        elif op == 'letrec':
+            bindings = expr[1]
+            body_parts = expr[2:]
+            placeholder = ['quote', []]
+            let_bindings = [[var, placeholder] for var, _ in bindings]
+            set_forms = [['set!', var, val] for var, val in bindings]
+            body_core_forms = set_forms + body_parts
+            body_core = body_core_forms[0] if len(body_core_forms) == 1 else ['begin'] + body_core_forms
+            return self._anf(['let', let_bindings, body_core])
         elif op == 'define':
             definition = expr[1]
             body = self._anf(expr[2])
