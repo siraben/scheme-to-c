@@ -23,10 +23,51 @@ def build_vm_object():
 
 def run_test(base_name):
     scm = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.scm")
+    error_file = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.error")
     output_dir = os.path.join(REPO_ROOT, "tests", "output")
     os.makedirs(output_dir, exist_ok=True)
     c_file = os.path.join(output_dir, f"test_{base_name}.c")
     exe_file = os.path.join(output_dir, f"test_{base_name}_runner")
+
+    if os.path.exists(error_file):
+        # For negative tests simply ensure both our compiler and Guile fail.
+        compile_res = subprocess.run([
+            "python3",
+            os.path.join(REPO_ROOT, "scheme_to_c.py"),
+            scm,
+            c_file,
+        ], capture_output=True, text=True)
+
+        if compile_res.returncode != 0:
+            ours_failed = True
+        else:
+            c_res = subprocess.run([
+                CC,
+                *CFLAGS,
+                "-o",
+                exe_file,
+                c_file,
+                VM_OBJECT,
+                PRIM_OBJECT,
+                *LIBS,
+            ], capture_output=True, text=True)
+            if c_res.returncode != 0:
+                ours_failed = True
+            else:
+                run_res = subprocess.run([exe_file], capture_output=True, text=True)
+                ours_failed = run_res.returncode != 0
+
+        prelude = os.path.join(REPO_ROOT, "tests", "guile_prelude.scm")
+        guile_res = subprocess.run(["guile", "-l", prelude, scm], capture_output=True, text=True)
+        guile_failed = guile_res.returncode != 0
+
+        if ours_failed and guile_failed:
+            print(f"PASS: {base_name} (error as expected)")
+            return True
+        else:
+            print(f"FAIL: {base_name} (expected failure)")
+            print("Our compiler failed:", ours_failed, "Guile failed:", guile_failed)
+            return False
 
     # compile Scheme to C and then to native code
     subprocess.check_call(["python3", os.path.join(REPO_ROOT, "scheme_to_c.py"), scm, c_file])
