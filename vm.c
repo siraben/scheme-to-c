@@ -680,17 +680,18 @@ int is_symbol_eq(reg symbol_reg, const char* c_name) {
 }
 
 reg eval_scheme_expr(reg expr, reg* current_eval_env) {
-    #ifdef DEBUG_VM
-    printf("DEBUG: eval_scheme_expr called.\n");
-    printf("DEBUG: Expr to eval: "); write_obj(expr); puts("");
-    printf("DEBUG: Eval Env (ptr %p): ", (void*)current_eval_env); 
-    if(current_eval_env) { 
-        write_obj(*current_eval_env); 
-    } else {
-        printf("(null C env pointer - problem!)"); 
-    }
-    puts("");
-    #endif
+    while (1) {
+        #ifdef DEBUG_VM
+        printf("DEBUG: eval_scheme_expr called.\n");
+        printf("DEBUG: Expr to eval: "); write_obj(expr); puts("\n");
+        printf("DEBUG: Eval Env (ptr %p): ", (void*)current_eval_env);
+        if(current_eval_env) {
+            write_obj(*current_eval_env);
+        } else {
+            printf("(null C env pointer - problem!)");
+        }
+        puts("");
+        #endif
 
     // Self-evaluating types
     if (expr.t == FIXNUM || expr.t == BOOLEAN || expr.t == NIL || expr.t == CHAR || expr.t == STRING) {
@@ -800,13 +801,15 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
                 #ifdef DEBUG_VM
                 printf("DEBUG: eval_scheme_expr - IF evaluating consequent\n");
                 #endif
-                return eval_scheme_expr(conseq_expr, current_eval_env);
+                expr = conseq_expr;
+                continue;
             } else {
                 if (has_alternative) {
                     #ifdef DEBUG_VM
                     printf("DEBUG: eval_scheme_expr - IF evaluating alternative\n");
                     #endif
-                    return eval_scheme_expr(alt_expr, current_eval_env);
+                    expr = alt_expr;
+                    continue;
                 } else {
                     #ifdef DEBUG_VM
                     printf("DEBUG: eval_scheme_expr - IF no alternative, returning NIL (unspecified)\n");
@@ -913,32 +916,24 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
                 return nil_val;
             }
 
-            reg let_last_val; 
-            let_last_val.t = NIL; 
-            int let_evaluated_at_least_one = 0;
             reg* current_let_body_node = body_forms_ptr;
-
-            while(current_let_body_node != NULL && current_let_body_node->t == PAIR) {
-                if (current_let_body_node->car == NULL) { 
-                    printf("ERROR: Malformed let body - null expression.\\n"); exit(1); 
+            while(current_let_body_node != NULL && current_let_body_node->t == PAIR &&
+                  current_let_body_node->cdr != NULL && current_let_body_node->cdr->t == PAIR) {
+                if (current_let_body_node->car == NULL) {
+                    printf("ERROR: Malformed let body - null expression.\\n"); exit(1);
                 }
-                let_last_val = eval_scheme_expr(*(current_let_body_node->car), eval_env_for_let_body);
-                let_evaluated_at_least_one = 1;
+                eval_scheme_expr(*(current_let_body_node->car), eval_env_for_let_body);
                 current_let_body_node = current_let_body_node->cdr;
             }
-            if (current_let_body_node != NULL && current_let_body_node->t != NIL) { // Check for improper body list
+            if (current_let_body_node == NULL || current_let_body_node->car == NULL) {
+                printf("ERROR: Malformed let body - missing last expression.\\n"); exit(1);
+            }
+            if (current_let_body_node->cdr != NULL && current_let_body_node->cdr->t != NIL) {
                 printf("ERROR: Malformed let body - improper list.\\n"); exit(1);
             }
-            
-            if (!let_evaluated_at_least_one ) { 
-                 // This case should ideally be covered if body_forms_ptr was NIL initially.
-                 // If body_forms_ptr was PAIR but led to no evaluations (e.g. if it was '(#t) - not a list of exprs)
-                 // then let_last_val would remain NIL.
-                 #ifdef DEBUG_VM
-                 printf("DEBUG: eval_scheme_expr - LET body forms did not evaluate to anything, returning last val (NIL if empty body effectively)\\n");
-                 #endif
-            }
-            return let_last_val;
+            expr = *(current_let_body_node->car);
+            current_eval_env = eval_env_for_let_body;
+            continue;
         }
 
         // OR: (or expr1 expr2 ...)
@@ -1050,30 +1045,23 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             }
 
             reg* current_stmt_node = expr.cdr;
-            reg last_val; // To store the result of the last expression
-            last_val.t = NIL; // Default if begin somehow ends up empty after all (should not with check above)
-            int evaluated_at_least_one = 0;
-
-            while(current_stmt_node != NULL && current_stmt_node->t == PAIR) {
-                if (current_stmt_node->car == NULL) { 
-                    printf("ERROR: Malformed begin - null expression in body\n"); exit(1); 
+            while(current_stmt_node != NULL && current_stmt_node->t == PAIR &&
+                  current_stmt_node->cdr != NULL && current_stmt_node->cdr->t == PAIR) {
+                if (current_stmt_node->car == NULL) {
+                    printf("ERROR: Malformed begin - null expression in body\n"); exit(1);
                 }
-                last_val = eval_scheme_expr(*(current_stmt_node->car), current_eval_env);
-                evaluated_at_least_one = 1;
+                eval_scheme_expr(*(current_stmt_node->car), current_eval_env);
                 current_stmt_node = current_stmt_node->cdr;
             }
-            // After the loop, if current_stmt_node is not NIL, the list of expressions was improper.
-            if (current_stmt_node != NULL && current_stmt_node->t != NIL) {
+            if (current_stmt_node == NULL || current_stmt_node->car == NULL) {
+                printf("ERROR: Malformed begin - missing last expression\n"); exit(1);
+            }
+            if (current_stmt_node->cdr != NULL && current_stmt_node->cdr->t != NIL) {
                 printf("ERROR: Malformed begin expression - improper list of statements\n");
                 exit(1);
             }
-            if (!evaluated_at_least_one) { // Should be caught by the (expr.cdr == NULL || expr.cdr->t == NIL) check
-                 #ifdef DEBUG_VM
-                 printf("DEBUG: eval_scheme_expr - (begin) was effectively empty, returning NIL\n");
-                 #endif
-                 reg nil_val; nil_val.t = NIL; return nil_val;
-            }
-            return last_val;
+            expr = *(current_stmt_node->car);
+            continue;
         }
 
         // APPLICATION: (proc-expr arg1-expr ...)
@@ -1144,9 +1132,27 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             #ifdef DEBUG_VM
             printf("DEBUG: eval_scheme_expr - Applying closure\n");
             #endif
-            return apply_closure(proc_obj, evaluated_args_list_obj);
-        }
-        else if (proc_obj.t == PRIMITIVE_PROC) {
+            reg* formal_params_list = proc_obj.vars;
+            reg* body_expr_ptr = proc_obj.body;
+            reg* captured_env = proc_obj.env;
+
+            int params_count = list_length(*formal_params_list);
+            int args_count = list_length(evaluated_args_list_obj);
+            if (params_count != args_count) {
+                printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
+                exit(1);
+            }
+
+            reg* args_list_obj_ptr = alloc_reg();
+            memcpy(args_list_obj_ptr, &evaluated_args_list_obj, sizeof(reg));
+
+            reg* new_frame_bindings = cons(formal_params_list, args_list_obj_ptr);
+            reg* eval_env = cons(new_frame_bindings, captured_env);
+
+            expr = *body_expr_ptr;
+            current_eval_env = eval_env;
+            continue;
+        } else if (proc_obj.t == PRIMITIVE_PROC) {
             #ifdef DEBUG_VM
             printf("DEBUG: eval_scheme_expr - Applying PRIMITIVE_PROC, proc_obj.c_primitive_proc = %p\n", (void*)proc_obj.c_primitive_proc);
             #endif
@@ -1167,6 +1173,7 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
     reg error_val;
     error_val.t = NIL; // Or a specific error type
     return error_val;
+    }
 }
 
 reg primitive_plus(reg args_list_obj) {
