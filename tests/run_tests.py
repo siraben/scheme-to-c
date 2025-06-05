@@ -26,10 +26,41 @@ def build_vm_object():
 def run_test(base_name):
     scm = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.scm")
     expected_file = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.expected")
+    error_file = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.error")
     output_dir = os.path.join(REPO_ROOT, "tests", "output")
     os.makedirs(output_dir, exist_ok=True)
     c_file = os.path.join(output_dir, f"test_{base_name}.c")
     exe_file = os.path.join(output_dir, f"test_{base_name}_runner")
+
+    if os.path.exists(error_file):
+        result = subprocess.run([
+            "python3",
+            os.path.join(REPO_ROOT, "scheme_to_c.py"),
+            scm,
+            c_file,
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            actual_err = (result.stderr + result.stdout).strip()
+        else:
+            subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, PRIM_OBJECT, *LIBS])
+            run_res = subprocess.run([exe_file], capture_output=True, text=True)
+            actual_err = (run_res.stderr + run_res.stdout).strip()
+
+        with open(os.path.join(output_dir, f"test_{base_name}.actual"), "w") as f:
+            f.write(actual_err)
+
+        with open(error_file) as f:
+            expected_err = f.read().strip()
+
+        if expected_err in actual_err:
+            print(f"PASS: {base_name} (error as expected)")
+            return True
+        else:
+            print(f"FAIL: {base_name} (expected error)")
+            print("Expected substring:", expected_err)
+            print("Actual output:", actual_err)
+            return False
 
     subprocess.check_call(["python3", os.path.join(REPO_ROOT, "scheme_to_c.py"), scm, c_file])
     subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, PRIM_OBJECT, *LIBS])
