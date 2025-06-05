@@ -15,7 +15,7 @@ VM_SOURCE = os.path.join(REPO_ROOT, "vm.c")
 
 
 def build_vm_object():
-    if not os.path.exists(VM_OBJECT):
+    if not os.path.exists(VM_OBJECT) or os.path.getmtime(VM_SOURCE) > os.path.getmtime(VM_OBJECT):
         subprocess.check_call([CC, *CFLAGS, "-c", VM_SOURCE, "-o", VM_OBJECT])
 
 
