@@ -59,7 +59,7 @@ class SchemeToC:
             self.emit("eax.t = NIL")
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
             escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
-            self.emit("eax = *make_string(\"{}\");", escaped)
+            self.emit("eax = *make_string(\"{}\")", escaped)
             
     def gensym(self) -> str:
         self.gensym_count += 1
@@ -170,8 +170,8 @@ class SchemeToC:
             self.emit_immediate(x)
         elif isinstance(x, str): # This is a Scheme symbol/variable an Python string
             self.emit("// Variable lookup for scheme symbol: {}", x)
-            self.emit("eax = *make_symbol(\"{}\");", x)
-            self.emit("lookup_in_env(env); // Result of lookup will be in eax")
+            self.emit("eax = *make_symbol(\"{}\")", x)
+            self.emit_no_colon("lookup_in_env(env); // Result of lookup will be in eax")
         elif isinstance(x, list) and x: 
             op = x[0]
             args = x[1:]
@@ -286,13 +286,13 @@ class SchemeToC:
         end_label = self.gensym()
         
         self.emit_expr(pred)
-        self.emit("if (!eax.b){{goto {};}}", alt_label)
+        self.emit_no_colon("if (!eax.b){{goto {};}}", alt_label)
         self.emit_expr(conseq)
         self.emit("goto {}", end_label)
         self.emit_no_colon("{}:", alt_label)
         self.emit_expr(alt)
         self.emit_no_colon("{}:", end_label)
-        self.emit("")
+        self.emit_no_colon("")
 
     def emit_begin(self, expressions_list: Iterable[Any]) -> None:
         for expr in expressions_list:
@@ -301,29 +301,29 @@ class SchemeToC:
     def emit_add_var_to_global_vm_env(self, scheme_var_name: str, c_src_var_name_or_reg: str) -> None:
         self.emit("// Add simple global variable '{}' to VM's global 'env' from C var/reg {}", scheme_var_name, c_src_var_name_or_reg)
         self.emit_no_colon("{{")
-        self.emit("  reg* var_sym_for_env = make_symbol(\"{}\");", scheme_var_name)
-        self.emit("  reg* var_val_ptr_for_env = alloc_reg();")
-        self.emit("  memcpy(var_val_ptr_for_env, &{}, sizeof(reg)); // Store copy of {}'s value", c_src_var_name_or_reg, c_src_var_name_or_reg)
-        self.emit("  reg* env_current_global_frame = car(env);")
-        self.emit("  reg* env_old_symbols = car(env_current_global_frame);")
-        self.emit("  reg* env_old_values = cdr(env_current_global_frame);")
-        self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols);")
-        self.emit("  reg* env_new_values = cons(var_val_ptr_for_env, env_old_values);")
-        self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values);")
-        self.emit("  env = cons(new_global_frame, cdr(env));")
+        self.emit("  reg* var_sym_for_env = make_symbol(\"{}\")", scheme_var_name)
+        self.emit("  reg* var_val_ptr_for_env = alloc_reg()")
+        self.emit_no_colon("  memcpy(var_val_ptr_for_env, &{}, sizeof(reg)); // Store copy of {}'s value", c_src_var_name_or_reg, c_src_var_name_or_reg)
+        self.emit("  reg* env_current_global_frame = car(env)")
+        self.emit("  reg* env_old_symbols = car(env_current_global_frame)")
+        self.emit("  reg* env_old_values = cdr(env_current_global_frame)")
+        self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols)")
+        self.emit("  reg* env_new_values = cons(var_val_ptr_for_env, env_old_values)")
+        self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values)")
+        self.emit("  env = cons(new_global_frame, cdr(env))")
         self.emit_no_colon("}}")
 
     def emit_add_var_to_global_vm_env_ptr(self, scheme_var_name: str, c_src_reg_ptr: str) -> None:
         self.emit("// Add global variable '{}' to VM env by pointer".format(scheme_var_name))
         self.emit_no_colon("{{")
-        self.emit("  reg* var_sym_for_env = make_symbol(\"{}\");", scheme_var_name)
-        self.emit("  reg* env_current_global_frame = car(env);")
-        self.emit("  reg* env_old_symbols = car(env_current_global_frame);")
-        self.emit("  reg* env_old_values = cdr(env_current_global_frame);")
-        self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols);")
-        self.emit("  reg* env_new_values = cons_ptr({}, env_old_values);", c_src_reg_ptr)
-        self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values);")
-        self.emit("  env = cons(new_global_frame, cdr(env));")
+        self.emit("  reg* var_sym_for_env = make_symbol(\"{}\")", scheme_var_name)
+        self.emit("  reg* env_current_global_frame = car(env)")
+        self.emit("  reg* env_old_symbols = car(env_current_global_frame)")
+        self.emit("  reg* env_old_values = cdr(env_current_global_frame)")
+        self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols)")
+        self.emit("  reg* env_new_values = cons_ptr({}, env_old_values)", c_src_reg_ptr)
+        self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values)")
+        self.emit("  env = cons(new_global_frame, cdr(env))")
         self.emit_no_colon("}}")
 
     def emit_define(self, args_list: List[Any]) -> None:
@@ -363,35 +363,35 @@ class SchemeToC:
             # Storage for the C variable that will hold the closure reg struct.
             # This is distinct from _storage which holds the reg struct itself if allocated separately.
             # Storage for the closure reg struct itself, to allow self-reference.
-            self.emit("reg* {}_storage = alloc_reg();", c_var_name)
+            self.emit("reg* {}_storage = alloc_reg()", c_var_name)
 
 
-            self.emit("reg quoted_params_val_for_{};", c_var_name)
-            self.emit("reg quoted_body_val_for_{};", c_var_name)
+            self.emit("reg quoted_params_val_for_{}", c_var_name)
+            self.emit("reg quoted_body_val_for_{}", c_var_name)
             
             self.emit_expr(['quote', lambda_params])
-            self.emit("quoted_params_val_for_{} = eax;", c_var_name)
+            self.emit("quoted_params_val_for_{} = eax", c_var_name)
             variadic_flag = 1 if isinstance(lambda_params, str) else 0
             
             self.emit_expr(['quote', actual_body])
-            self.emit("quoted_body_val_for_{} = eax;", c_var_name)
+            self.emit("quoted_body_val_for_{} = eax", c_var_name)
             
             self.emit("// 1. Create a temporary closure capturing {}", 'global env' if not is_top_level else 'no environment')
             captured_env_arg = 'env' if not is_top_level else 'NULL'
-            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, {}, {});",
+            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, {}, {} )",
                       c_var_name, c_var_name, c_var_name, captured_env_arg, variadic_flag)
             
             self.emit("// 2. Copy this temporary closure into our dedicated storage '{}_storage'", c_var_name)
-            self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg));", c_var_name, c_var_name)
+            self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg))", c_var_name, c_var_name)
             
             self.emit("// 3. Add this closure (now in *{}_storage) to the global environment under its name '{}'.", c_var_name, scheme_var_name)
             self.emit_add_var_to_global_vm_env_ptr(scheme_var_name, f"{c_var_name}_storage")
             
             if is_top_level:
-                self.emit("{}_storage->env = NULL;", c_var_name)
+                self.emit("{}_storage->env = NULL", c_var_name)
                 pass
             else:
-                self.emit("{}_storage->env = env;", c_var_name)
+                self.emit("{}_storage->env = env", c_var_name)
                 pass
 
             self.emit("// End defining {}", var_name_str)
@@ -450,13 +450,13 @@ class SchemeToC:
             self.emit("eax.t = NIL")
         elif isinstance(x, str) and not any(c in x for c in ['(', ')', ' ', '\'', '#']):
             escaped_x_for_symbol = x.replace('\\', '\\\\').replace('"', '\\"')
-            self.emit("eax = *make_symbol(\"{}\");", escaped_x_for_symbol)
+            self.emit("eax = *make_symbol(\"{}\")", escaped_x_for_symbol)
         elif isinstance(x, str):
             escaped_str = x.replace('\\', '\\\\').replace('"', '\\"')
-            self.emit("eax = *make_symbol(\"{}\");", escaped_str)
+            self.emit("eax = *make_symbol(\"{}\")", escaped_str)
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
             escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
-            self.emit("eax = *make_string(\"{}\");", escaped)
+            self.emit("eax = *make_string(\"{}\")", escaped)
         elif isinstance(x, list) and x: 
             self.emit_quoted_list(x)
         elif self.is_immediate(x) and not self.is_null(x):
@@ -559,7 +559,7 @@ class SchemeToC:
             self.emit("reg tmp_set_val = eax")
             # Prepare parameters for runtime environment update
             self.emit("ebx = tmp_set_val")
-            self.emit("eax = *make_symbol(\"{}\");", var_name_str)
+            self.emit("eax = *make_symbol(\"{}\")", var_name_str)
             self.emit("set_var_in_env(env)")
             self.emit("eax = tmp_set_val")
         else:
@@ -601,7 +601,7 @@ class SchemeToC:
             next_clause_label = self.gensym()
 
             self.emit_expr(pred_expr)
-            self.emit("if (!eax.b){{goto {};}}", next_clause_label)
+            self.emit_no_colon("if (!eax.b){{goto {};}}", next_clause_label)
 
             if body_exprs:
                 for expr in body_exprs:
