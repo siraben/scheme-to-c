@@ -23,9 +23,6 @@ Also included in this repository:
 
 - `scheme_to_c.py` - the Python implementation of the compiler
 - `vm.c` - the C runtime providing objects and primitive procedures
-- A meta-circular evaluator for Scheme
-  - Now includes tests!
-  - Implements lexical scoping, mutation and proper closures.
 
 Compiler overview
 -----------------
