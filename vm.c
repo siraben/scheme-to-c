@@ -788,6 +788,48 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             continue;
         }
 
+        // SET!: (set! <var> <expr>)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "set!")) {
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL ||
+                expr.cdr->cdr == NULL || expr.cdr->cdr->t != PAIR || expr.cdr->cdr->car == NULL ||
+                (expr.cdr->cdr->cdr != NULL && expr.cdr->cdr->cdr->t != NIL)) {
+                printf("ERROR: Malformed set! expression - expected (set! <var> <expr>)\n");
+                exit(1);
+            }
+
+            reg var_sym = *(expr.cdr->car);
+            if (var_sym.t != SYMBOL) {
+                printf("ERROR: set! first argument must be a symbol\n");
+                exit(1);
+            }
+
+            reg val_expr = *(expr.cdr->cdr->car);
+            reg new_val = eval_scheme_expr(val_expr, current_eval_env);
+
+            reg saved_eax = eax;
+            reg saved_ebx = ebx;
+            eax = var_sym;
+            ebx = new_val;
+            set_var_in_env(current_eval_env);
+            eax = saved_eax;
+            ebx = saved_ebx;
+            return new_val;
+        }
+
+        // DISPLAY: (display <expr>)
+        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "display")) {
+            if (expr.cdr == NULL || expr.cdr->t != PAIR || expr.cdr->car == NULL ||
+                (expr.cdr->cdr != NULL && expr.cdr->cdr->t != NIL)) {
+                printf("ERROR: Malformed display expression - expected (display <expr>)\n");
+                exit(1);
+            }
+
+            reg disp_val = eval_scheme_expr(*(expr.cdr->car), current_eval_env);
+            display_obj(disp_val);
+            fflush(stdout);
+            return disp_val;
+        }
+
         // APPLICATION: (proc-expr arg1-expr ...)
         // This is the default case for a PAIR that is not a special form.
         #ifdef DEBUG_VM
