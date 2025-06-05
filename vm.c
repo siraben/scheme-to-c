@@ -35,6 +35,7 @@ typedef struct reg {
       struct reg *vars;
       struct reg *body;
       struct reg *env;
+      int variadic;
     };
     struct reg (*c_primitive_proc)(struct reg args_list); // Use 'struct reg'
   };
@@ -57,7 +58,7 @@ int reg_equal(reg a, reg b) {
 
 void write_obj(reg r);
 void display_obj(reg r);
-reg* make_closure(reg* params, reg* body_expr, reg* captured_env);
+reg* make_closure(reg* params, reg* body_expr, reg* captured_env, int variadic);
 reg apply_closure(reg closure_obj, reg args_list_obj);
 reg eval_scheme_expr(reg expr, reg* current_eval_env);
 int list_length(reg list_obj);
@@ -562,7 +563,7 @@ int vm_test_main(int argc, char const *argv[])
 }
 #endif
 
-reg* make_closure(reg* params, reg* body_expr, reg* captured_env) {
+reg* make_closure(reg* params, reg* body_expr, reg* captured_env, int variadic) {
     reg* closure_obj = alloc_reg(); // Use existing helper for allocation
     closure_obj->t = CLOSURE;
 
@@ -576,6 +577,7 @@ reg* make_closure(reg* params, reg* body_expr, reg* captured_env) {
 
     // captured_env is a pointer to an existing environment structure.
     closure_obj->env = captured_env;
+    closure_obj->variadic = variadic;
 
     return closure_obj;
 }
@@ -594,25 +596,27 @@ reg apply_closure(reg closure_obj, reg args_list_obj) {
         exit(1);
     }
 
-    reg* formal_params_list = closure_obj.vars; // This is a reg* pointing to a list of symbols
+    reg* formal_params_list = closure_obj.vars; // Could be list or symbol
+    int variadic = closure_obj.variadic;
     reg* body_expr_ptr = closure_obj.body;     // This is a reg* pointing to the body expression
     reg* captured_env = closure_obj.env;     // This is a reg*
     if (captured_env == NULL) {
         captured_env = env; // Use current global environment if none captured
     }
 
-    // Arity check
-    int params_count = list_length(*formal_params_list);
-    int args_count = list_length(args_list_obj);
+    // Arity check (skip if variadic)
+    if (!variadic) {
+        int params_count = list_length(*formal_params_list);
+        int args_count = list_length(args_list_obj);
 
-    #ifdef DEBUG_VM
-    printf("DEBUG: Arity check - Params: %d, Args: %d\n", params_count, args_count);
-    #endif
+        #ifdef DEBUG_VM
+        printf("DEBUG: Arity check - Params: %d, Args: %d\n", params_count, args_count);
+        #endif
 
-    if (params_count != args_count) {
-        printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
-        // Depending on strictness, could exit or return an error object
-        exit(1);
+        if (params_count != args_count) {
+            printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
+            exit(1);
+        }
     }
 
     // Construct new environment frame: ( (param_symbols_list) (actual_args_values_list) )
@@ -629,7 +633,18 @@ reg apply_closure(reg closure_obj, reg args_list_obj) {
     reg* args_list_obj_ptr = alloc_reg(); // Allocate a reg on the heap
     memcpy(args_list_obj_ptr, &args_list_obj, sizeof(reg)); // Copy args_list_obj content to it
 
-    reg* new_frame_bindings = cons(formal_params_list, args_list_obj_ptr);
+    reg* params_for_env = formal_params_list;
+    reg* arg_values_for_env = args_list_obj_ptr;
+    if (variadic) {
+        reg* nil_for_var = alloc_reg();
+        nil_for_var->t = NIL;
+        params_for_env = cons(formal_params_list, nil_for_var);
+        reg* nil_binding_tail = alloc_reg();
+        nil_binding_tail->t = NIL;
+        arg_values_for_env = cons_ptr(args_list_obj_ptr, nil_binding_tail);
+    }
+
+    reg* new_frame_bindings = cons(params_for_env, arg_values_for_env);
     
     // Extend captured environment
     // captured_env should now always be a valid pointer (to NIL or a PAIR)
@@ -1011,9 +1026,12 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             reg* params_list_ptr = expr.cdr->car;  // cadr(expr)
             reg* body_expr_ptr = expr.cdr->cdr->car; // caddr(expr)
 
-            // Params list should be a list of symbols or NIL for lambda ()
-            if (params_list_ptr->t != PAIR && params_list_ptr->t != NIL) {
-                 printf("ERROR: Lambda parameters must be a list.\n");
+            int variadic_flag = 0;
+            // Params can be a list of symbols (PAIR/NIL) or a single symbol for variadic
+            if (params_list_ptr->t == SYMBOL) {
+                 variadic_flag = 1;
+            } else if (params_list_ptr->t != PAIR && params_list_ptr->t != NIL) {
+                 printf("ERROR: Lambda parameters must be a list or symbol.\n");
                  exit(1);
             }
             // Further validation: check if all elements in params_list_ptr are symbols (can be added later)
@@ -1024,7 +1042,7 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             puts("");
             #endif
 
-            reg* new_closure = make_closure(params_list_ptr, body_expr_ptr, current_eval_env);
+            reg* new_closure = make_closure(params_list_ptr, body_expr_ptr, current_eval_env, variadic_flag);
             return *new_closure; // make_closure returns reg*, eval_scheme_expr returns reg
         }
 
@@ -1135,24 +1153,38 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             #ifdef DEBUG_VM
             printf("DEBUG: eval_scheme_expr - Applying closure\n");
             #endif
-            reg* formal_params_list = proc_obj.vars;
+            reg* formal_params_list = proc_obj.vars; // could be list or symbol
+            int variadic = proc_obj.variadic;
             reg* body_expr_ptr = proc_obj.body;
             reg* captured_env = proc_obj.env;
             if (captured_env == NULL) {
                 captured_env = env;
             }
 
-            int params_count = list_length(*formal_params_list);
-            int args_count = list_length(evaluated_args_list_obj);
-            if (params_count != args_count) {
-                printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
-                exit(1);
+            if (!variadic) {
+                int params_count = list_length(*formal_params_list);
+                int args_count = list_length(evaluated_args_list_obj);
+                if (params_count != args_count) {
+                    printf("ERROR: Arity mismatch. Expected %d arguments, got %d.\n", params_count, args_count);
+                    exit(1);
+                }
             }
 
             reg* args_list_obj_ptr = alloc_reg();
             memcpy(args_list_obj_ptr, &evaluated_args_list_obj, sizeof(reg));
 
-            reg* new_frame_bindings = cons(formal_params_list, args_list_obj_ptr);
+            reg* params_for_env = formal_params_list;
+            reg* arg_values_for_env = args_list_obj_ptr;
+            if (variadic) {
+                reg* nil_for_var = alloc_reg();
+                nil_for_var->t = NIL;
+                params_for_env = cons(formal_params_list, nil_for_var);
+                reg* nil_binding_tail = alloc_reg();
+                nil_binding_tail->t = NIL;
+                arg_values_for_env = cons_ptr(args_list_obj_ptr, nil_binding_tail);
+            }
+
+            reg* new_frame_bindings = cons(params_for_env, arg_values_for_env);
             reg* eval_env = cons(new_frame_bindings, captured_env);
 
             expr = *body_expr_ptr;

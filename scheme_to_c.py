@@ -96,7 +96,11 @@ class SchemeToC:
         elif op == 'lambda':
             params = expr[1]
             body_parts = expr[2:]
-            new_bound = bound | set(params)
+            if isinstance(params, list):
+                params_set = set(params)
+            else:
+                params_set = {params}
+            new_bound = bound | params_set
             fvs = set()
             for part in body_parts:
                 fvs |= self._free_vars(part, new_bound)
@@ -138,7 +142,11 @@ class SchemeToC:
                 fvs = self._free_vars(expr, bound)
                 self.lambda_free_vars[id(expr)] = list(fvs)
                 self.lambda_struct_names[id(expr)] = f"closure_env_{self.gensym()}"
-                new_bound = bound | set(params)
+                if isinstance(params, list):
+                    params_set = set(params)
+                else:
+                    params_set = {params}
+                new_bound = bound | params_set
                 for part in body_parts:
                     self._analyze_lambdas(part, new_bound)
             elif op == 'let':
@@ -177,7 +185,7 @@ class SchemeToC:
         self.emit_no_colon("    char *s;")
         self.emit_no_colon("    int b;")
         self.emit_no_colon("    struct {{ struct reg *car; struct reg *cdr; }}; // PAIR")
-        self.emit_no_colon("    struct {{ struct reg *vars; struct reg *body; struct reg *env; }}; // CLOSURE")
+        self.emit_no_colon("    struct {{ struct reg *vars; struct reg *body; struct reg *env; int variadic; }}; // CLOSURE")
         self.emit_no_colon("    struct reg (*c_primitive_proc)(struct reg args_list); // PRIMITIVE_PROC")
         self.emit_no_colon("  }};")
         self.emit_no_colon("}} reg;")
@@ -198,7 +206,7 @@ class SchemeToC:
         self.emit_no_colon("reg *make_number(long long value);")
         self.emit_no_colon("reg *make_boolean(unsigned int value);")
         self.emit_no_colon("reg *make_string(char *name);")
-        self.emit_no_colon("reg* make_closure(reg* params, reg* body_expr, reg* captured_env);")
+        self.emit_no_colon("reg* make_closure(reg* params, reg* body_expr, reg* captured_env, int variadic);")
         self.emit_no_colon("reg apply_closure(reg closure, reg args);")
         self.emit_no_colon("void initialize_global_env();")
         self.emit_no_colon("reg *alloc_reg();")
@@ -434,14 +442,15 @@ class SchemeToC:
             
             self.emit_expr(['quote', lambda_params])
             self.emit("quoted_params_val_for_{} = eax;", c_var_name)
+            variadic_flag = 1 if isinstance(lambda_params, str) else 0
             
             self.emit_expr(['quote', actual_body])
             self.emit("quoted_body_val_for_{} = eax;", c_var_name)
             
             self.emit("// 1. Create a temporary closure capturing {}", 'global env' if not is_top_level else 'no environment')
             captured_env_arg = 'env' if not is_top_level else 'NULL'
-            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, {});",
-                      c_var_name, c_var_name, c_var_name, captured_env_arg)
+            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, {}, {});",
+                      c_var_name, c_var_name, c_var_name, captured_env_arg, variadic_flag)
             
             self.emit("// 2. Copy this temporary closure into our dedicated storage '{}_storage'", c_var_name)
             self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg));", c_var_name, c_var_name)
@@ -557,11 +566,12 @@ class SchemeToC:
 
         self.emit_expr(['quote', params_list])
         self.emit("reg lambda_params_val = eax")
+        variadic_flag = 1 if isinstance(params_list, str) else 0
 
         self.emit_expr(['quote', actual_body_expr])
         self.emit("reg lambda_body_val = eax")
 
-        self.emit("reg* new_closure_ptr = make_closure(&lambda_params_val, &lambda_body_val, {} )", env_var)
+        self.emit("reg* new_closure_ptr = make_closure(&lambda_params_val, &lambda_body_val, {}, {} )", env_var, variadic_flag)
         self.emit("eax = *new_closure_ptr")
         self.emit_no_colon("}} // End LAMBDA scope")
 
