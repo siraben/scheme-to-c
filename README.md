@@ -9,6 +9,12 @@ It reads a Scheme source file and emits C. A typical invocation is:
 ```bash
 python3 scheme_to_c.py input.scm output.c
 ```
+Then compile the generated C file together with `vm.c`:
+
+```bash
+clang -O2 -Wall -Wextra -o program output.c vm.c -lgc
+./program
+```
 
 *Disclaimer*: I do not have any background in writing compilers. Pull
 requests are welcome!
@@ -16,10 +22,20 @@ requests are welcome!
 Also included in this repository:
 
 - `scheme_to_c.py` - the Python implementation of the compiler
+- `vm.c` - the C runtime providing objects and primitive procedures
 - A meta-circular evaluator for Scheme
   - Now includes tests!
-  - Includes lexical scoping and proper closures.
-  - [ ] Add mutation and `define`
+  - Implements lexical scoping, mutation and proper closures.
+
+Compiler overview
+-----------------
+The compiler parses Scheme code and performs several passes:
+
+1. **A-normal form** transformation simplifies nested expressions.
+2. **Lambda analysis** collects free variables and converts lambdas
+   into closures with environment structs.
+3. C code is generated that links against `vm.c`, which provides the
+   runtime system and uses the Boehm GC.
 
 Running tests
 -------------
@@ -36,35 +52,24 @@ python3 tests/run_tests.py
 Grammar of input language
 -------------------------
 
-``` xml
-<expr> := #t
-          #f
-          (-)<number>
-          <sym>
-          (eq? <expr> <expr>)
-          (boolean? <expr>)
-          (fixnum? <expr>)
-          (add1 <expr>)
-          (sub1 <expr>)
-          (zero? <expr>)
-          (define <sym> <expr>)
-          (let ((<sym> <expr>) ...)
-            <body>)
-          (car <expr>)
-          (cdr <expr>)
-          (cons <expr> <expr>)
-          (quote <expr>)
-          (cond (<expr> <expr>) ...)
-          (begin <expr> ...)
-          (+ <expr> <expr>)
-          (- <expr> <expr>)
-          (* <expr> <expr>)
-          (/ <expr> <expr>)
-          (remainder <expr> <expr>)
-          (if <expr> <expr> <expr>)
-          (label <sym>)
-          (goto <sym>)
+``` scheme
+<expr> := #t | #f | <number> | <string> | <sym>
+         (quote <expr>)
+         (if <expr> <expr> <expr>)
+         (begin <expr> ...)
+         (lambda (<sym> ...) <expr> ...)
+         (let ((<sym> <expr>) ...) <expr>)
+         (let* ((<sym> <expr>) ...) <expr>)
+         (letrec ((<sym> <expr>) ...) <expr>)
+         (set! <sym> <expr>)
+         (cond (<expr> <expr> ...) ...)
+         (label <sym>)
+         (goto <sym>)
+         (<expr> <expr> ...)
 ```
+
+Primitive procedures such as arithmetic operations, list manipulation,
+comparators and string functions are provided by the runtime.
 
 Example use
 -----------
@@ -162,10 +167,10 @@ Project Goals
 
 - [x] Be Turing complete!
 - [ ] Implement IO
-- [ ] Implement closures (i.e. `lambda`)
-    -  [ ] Implement frames and environments
-- [ ] Implement define (in the sense of functions)
-- [ ] Implement strings, vectors and their respective operations
+- [x] Implement closures (i.e. `lambda`)
+    -  [x] Implement frames and environments
+- [x] Implement define (in the sense of functions)
+- [ ] Implement strings (vectors still TODO) and their respective operations
 - [ ] Be self-hosting
 
 Futamura Projections
