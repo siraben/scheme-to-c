@@ -78,17 +78,12 @@ class SchemeToC:
         self.emit_no_colon("  }};")
         self.emit_no_colon("}} reg;")
         self.emit_no_colon("")
-        self.emit_no_colon("typedef struct llist {{ reg curr; struct llist *next; }} llist;")
-        self.emit_no_colon("")
         self.emit_no_colon("extern reg eax, ebx;")
-        self.emit_no_colon("extern llist *stack;")
         self.emit_no_colon("extern reg *env;")
-        self.emit_no_colon("extern int al;") 
+        self.emit_no_colon("extern int al;")
         self.emit_no_colon("")
         self.emit_no_colon("// Forward declarations for functions in vm.c")
-        self.emit_no_colon("void push();")
-        self.emit_no_colon("void pop();")
-        self.emit_no_colon("void cmp();")
+        self.emit_no_colon("int reg_equal(reg a, reg b);")
         self.emit_no_colon("reg *car(reg *head);")
         self.emit_no_colon("reg *cdr(reg *head);")
         self.emit_no_colon("void write_obj(reg r);")
@@ -157,12 +152,12 @@ class SchemeToC:
             elif op == 'char?': self.emit_unary_pred_generic(args[0], "eax.t == CHAR")
             elif op == 'boolean?': self.emit_unary_pred_generic(args[0], "eax.t == BOOLEAN")
             elif op == 'null?': self.emit_unary_pred_generic(args[0], "eax.t == NIL")
-            elif op == 'eq?': self.emit_binary_op_generic(args[0], args[1], "cmp()")
-            elif op == '+': self.emit_binary_op_generic(args[0], args[1], "eax.n += al", "al = eax.n")
-            elif op == '-': self.emit_binary_op_generic(args[0], args[1], "eax.n -= al", "al = eax.n")
-            elif op == '*': self.emit_binary_op_generic(args[0], args[1], "eax.n *= al", "al = eax.n")
-            elif op == '/': self.emit_binary_op_generic(args[0], args[1], "eax.n /= al", "al = eax.n")
-            elif op == 'remainder': self.emit_binary_op_generic(args[0], args[1], "eax.n %= al", "al = eax.n")
+            elif op == 'eq?': self.emit_eq(args[0], args[1])
+            elif op == '+': self.emit_binary_op_direct(args[0], args[1], '+')
+            elif op == '-': self.emit_binary_op_direct(args[0], args[1], '-')
+            elif op == '*': self.emit_binary_op_direct(args[0], args[1], '*')
+            elif op == '/': self.emit_binary_op_direct(args[0], args[1], '/')
+            elif op == 'remainder': self.emit_binary_op_direct(args[0], args[1], '%')
             elif op == 'label': self.emit_label(args[0])
             elif op == 'goto': self.emit_goto(args[0])
             elif op == 'exit': self.emit_exit(args[0])
@@ -184,14 +179,31 @@ class SchemeToC:
         self.emit("eax.t = BOOLEAN")
         self.emit("eax.b = al")
 
-    def emit_binary_op_generic(self, arg1_expr, arg2_expr, c_operation_on_eax_al, pre_pop_instr=None):
+    def emit_binary_op_generic(self, arg1_expr, arg2_expr, c_operation_fmt):
+        """Emit code for a binary operation using a temporary variable."""
+        temp = f"tmp_{self.gensym()}"
         self.emit_expr(arg1_expr)
-        self.emit("push()")
+        self.emit(f"reg {temp} = eax")
         self.emit_expr(arg2_expr)
-        if pre_pop_instr:
-            self.emit(pre_pop_instr)
-        self.emit("pop()")
-        self.emit(c_operation_on_eax_al)
+        self.emit(c_operation_fmt.format(temp=temp))
+
+    def emit_binary_op_direct(self, arg1_expr, arg2_expr, op_symbol):
+        """Emit code for a binary arithmetic operation without using the VM stack."""
+        temp = f"tmp_{self.gensym()}"
+        self.emit_expr(arg1_expr)
+        self.emit(f"reg {temp} = eax")
+        self.emit_expr(arg2_expr)
+        self.emit(f"eax.n = {temp}.n {op_symbol} eax.n")
+        self.emit("eax.t = FIXNUM")
+
+    def emit_eq(self, arg1_expr, arg2_expr):
+        temp = f"tmp_{self.gensym()}"
+        self.emit_expr(arg1_expr)
+        self.emit(f"reg {temp} = eax")
+        self.emit_expr(arg2_expr)
+        self.emit(f"al = reg_equal({temp}, eax)")
+        self.emit("eax.t = BOOLEAN")
+        self.emit("eax.b = al")
 
     def emit_display(self, args_list):
         expr_to_display = args_list[0]
@@ -351,12 +363,12 @@ class SchemeToC:
             self.emit("eax.t = NIL") # Should be caught by is_null in emit_quote
             return
 
-        self.emit_quote(lst[0]) 
-        self.emit("push()")
-        self.emit_quote(lst[1:]) 
-        self.emit("ebx = eax") 
-        self.emit("pop()")     
-        self.emit("eax = *cons(&eax, &ebx)")
+        head_tmp = f"tmp_{self.gensym()}"
+        self.emit_quote(lst[0])
+        self.emit(f"reg {head_tmp} = eax")
+        self.emit_quote(lst[1:])
+        self.emit("ebx = eax")
+        self.emit(f"eax = *cons(&{head_tmp}, &ebx)")
 
 
     def emit_lambda_expr(self, args_list):
@@ -382,26 +394,20 @@ class SchemeToC:
         proc_expr = expr_list[0]
         arg_exprs = expr_list[1:]
 
-        self.emit_expr(proc_expr) 
-        self.emit("push()")      
+        self.emit_expr(proc_expr)
+        proc_tmp = f"tmp_{self.gensym()}"
+        self.emit(f"reg {proc_tmp} = eax")
 
+        args_tmp = f"tmp_{self.gensym()}"
         self.emit("eax.t = NIL")
-        self.emit("push()") 
+        self.emit(f"reg {args_tmp} = eax")
 
         for arg_expr in reversed(arg_exprs):
-            self.emit_expr(arg_expr) 
-            self.emit("ebx = eax")   
-            self.emit("pop()")       
-            self.emit("eax = *cons(&ebx, &eax); // ebx=new_arg, eax=list")
-            self.emit("push()")      
+            self.emit_expr(arg_expr)
+            self.emit("ebx = eax")
+            self.emit(f"{args_tmp} = *cons(&ebx, &{args_tmp})")
 
-        self.emit("pop()") 
-        self.emit("reg actual_args_val = eax")
-
-        self.emit("pop()") 
-        self.emit("reg proc_to_call_val = eax")
-
-        self.emit("eax = apply_closure(proc_to_call_val, actual_args_val)")
+        self.emit(f"eax = apply_closure({proc_tmp}, {args_tmp})")
         self.emit_no_colon("}} // End APPLY scope")
 
     def emit_set_bang(self, args_list): 
@@ -421,11 +427,11 @@ class SchemeToC:
 
     def emit_cons(self, args_list):
         self.emit_expr(args_list[0])
-        self.emit("push()")
-        self.emit_expr(args_list[1]) 
-        self.emit("ebx = eax")       
-        self.emit("pop()")          
-        self.emit("eax = *cons(&eax, &ebx)")
+        car_tmp = f"tmp_{self.gensym()}"
+        self.emit(f"reg {car_tmp} = eax")
+        self.emit_expr(args_list[1])
+        self.emit("ebx = eax")
+        self.emit(f"eax = *cons(&{car_tmp}, &ebx)")
 
     def emit_car(self, args_list): 
         self.emit_expr(args_list[0])
