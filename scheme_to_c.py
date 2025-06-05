@@ -603,12 +603,13 @@ class SchemeToC:
         if isinstance(var_name_str, str):
             # Evaluate new value
             self.emit_expr(body_expr)
-            self.emit("reg tmp_set_val = eax")
+            temp = f"tmp_{self.gensym()}"
+            self.emit(f"reg {temp} = eax")
             # Prepare parameters for runtime environment update
-            self.emit("ebx = tmp_set_val")
+            self.emit(f"ebx = {temp}")
             self.emit("eax = *make_symbol(\"{}\")", var_name_str)
             self.emit("set_var_in_env(env)")
-            self.emit("eax = tmp_set_val")
+            self.emit(f"eax = {temp}")
         else:
             self.emit_no_colon("// SET! target is not a symbol: {}", var_name_str)
 
