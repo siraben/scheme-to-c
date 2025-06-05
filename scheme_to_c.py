@@ -72,50 +72,80 @@ class SchemeToC:
         return f"g{self.gensym_count}"
 
 
-    def _desugar_or(self, args: List[Any]) -> Any:
-        if not args:
-            return False
-        if len(args) == 1:
-            return self._desugar_expr(args[0])
-        tmp = self.gensym_scheme_var()
-        first = self._desugar_expr(args[0])
-        rest = self._desugar_or(args[1:])
-        expr = ['let', [[tmp, first]], ['if', tmp, tmp, rest]]
-        return self._desugar_expr(expr)
+    # ----- AST transformation passes -----
 
-    def _desugar_and(self, args: List[Any]) -> Any:
-        if not args:
-            return True
-        if len(args) == 1:
-            return self._desugar_expr(args[0])
-        tmp = self.gensym_scheme_var()
-        first = self._desugar_expr(args[0])
-        rest = self._desugar_and(args[1:])
-        expr = ['let', [[tmp, first]], ['if', tmp, rest, tmp]]
-        return self._desugar_expr(expr)
-
-    def _desugar_expr(self, x: Any) -> Any:
-        if isinstance(x, list) and x:
-            op = x[0]
-            args = x[1:]
+    def pass_desugar_or(self, expr: Any) -> Any:
+        """Eliminate the `or` special form."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
             if op == 'or':
-                return self._desugar_or(args)
+                if not args:
+                    return False
+                if len(args) == 1:
+                    return self.pass_desugar_or(args[0])
+                tmp = self.gensym_scheme_var()
+                first = self.pass_desugar_or(args[0])
+                rest = self.pass_desugar_or(['or', *args[1:]])
+                return self.pass_desugar_or(['let', [[tmp, first]], ['if', tmp, tmp, rest]])
+            return [op] + [self.pass_desugar_or(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def pass_desugar_and(self, expr: Any) -> Any:
+        """Eliminate the `and` special form."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
             if op == 'and':
-                return self._desugar_and(args)
+                if not args:
+                    return True
+                if len(args) == 1:
+                    return self.pass_desugar_and(args[0])
+                tmp = self.gensym_scheme_var()
+                first = self.pass_desugar_and(args[0])
+                rest = self.pass_desugar_and(['and', *args[1:]])
+                return self.pass_desugar_and(['let', [[tmp, first]], ['if', tmp, rest, tmp]])
+            return [op] + [self.pass_desugar_and(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def pass_desugar_let(self, expr: Any) -> Any:
+        """Rewrite `let` into a lambda application."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
             if op == 'let':
                 bindings = args[0]
                 body = args[1:]
                 vars_ = [v for v, _ in bindings]
-                vals = [self._desugar_expr(val) for _, val in bindings]
-                body_ds = [self._desugar_expr(b) for b in body]
+                vals = [self.pass_desugar_let(val) for _, val in bindings]
+                body_ds = [self.pass_desugar_let(b) for b in body]
                 body_expr = body_ds[0] if len(body_ds) == 1 else ['begin'] + body_ds
                 return [ ['lambda', vars_, body_expr], *vals ]
+            return [op] + [self.pass_desugar_let(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def pass_desugar_letstar(self, expr: Any) -> Any:
+        """Expand `let*` into nested `let` forms."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
             if op == 'let*':
-                expr = ['begin'] + args[1:] if len(args) > 1 else args[1:]
+                expr2 = ['begin'] + args[1:] if len(args) > 1 else args[1:]
                 bindings = args[0]
                 for var, val in reversed(bindings):
-                    expr = ['let', [[var, val]], expr]
-                return self._desugar_expr(expr)
+                    expr2 = ['let', [[var, val]], expr2]
+                return self.pass_desugar_letstar(expr2)
+            return [op] + [self.pass_desugar_letstar(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def pass_desugar_letrec(self, expr: Any) -> Any:
+        """Turn `letrec` into a `let` with placeholders and `set!`."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
             if op == 'letrec':
                 bindings = args[0]
                 body = args[1:]
@@ -124,13 +154,36 @@ class SchemeToC:
                 set_forms = [['set!', var, val] for var, val in bindings]
                 body_forms = set_forms + body
                 body_expr = body_forms[0] if len(body_forms) == 1 else ['begin'] + body_forms
-                expr = ['let', let_bindings, body_expr]
-                return self._desugar_expr(expr)
-            return [op] + [self._desugar_expr(arg) for arg in args]
-        elif isinstance(x, list):
+                return self.pass_desugar_letrec(['let', let_bindings, body_expr])
+            return [op] + [self.pass_desugar_letrec(a) for a in args]
+        elif isinstance(expr, list):
             return []
-        else:
-            return x
+        return expr
+
+    def pass_lift_internal_defines(self, expr: Any) -> Any:
+        """Convert internal defines inside lambdas into letrec bindings."""
+        if isinstance(expr, list) and expr:
+            op, *args = expr
+            if op == 'lambda':
+                params = args[0]
+                body_parts = [self.pass_lift_internal_defines(b) for b in args[1:]]
+                body_parts = self._transform_internal_defines(body_parts)
+                actual_body = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+                return ['lambda', params, actual_body]
+            return [op] + [self.pass_lift_internal_defines(a) for a in args]
+        elif isinstance(expr, list):
+            return []
+        return expr
+
+    def apply_passes(self, expr: Any) -> Any:
+        """Run all compiler passes on the expression AST."""
+        expr = self.pass_lift_internal_defines(expr)
+        expr = self.pass_desugar_or(expr)
+        expr = self.pass_desugar_and(expr)
+        expr = self.pass_desugar_letrec(expr)
+        expr = self.pass_desugar_letstar(expr)
+        expr = self.pass_desugar_let(expr)
+        return expr
 
     def _transform_internal_defines(self, body_parts: List[Any]) -> List[Any]:
         defines: List[Any] = []
@@ -169,6 +222,7 @@ class SchemeToC:
 
 
     def emit_program(self, x_expr: Any) -> None:
+        x_expr = self.apply_passes(x_expr)
         self.nesting_level = 0
         self.emit_no_colon("// -- BEGIN GENERATED C PREAMBLE --")
         self.emit_no_colon("#include <stdio.h>")
@@ -422,7 +476,7 @@ class SchemeToC:
             body_parts = val_expr[2:]
             body_parts = self._transform_internal_defines(body_parts)
             actual_body = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
-            actual_body = self._desugar_expr(actual_body)
+            actual_body = self.apply_passes(actual_body)
 
             self.emit("// Defining potentially recursive function {} as {}", var_name_str, repr(actual_body))
             # Storage for the C variable that will hold the closure reg struct.
@@ -476,15 +530,15 @@ class SchemeToC:
             self.emit("// End defining simple global {}", var_name_str)
 
     def emit_let(self, args_list: List[Any]) -> None:
-        expanded = self._desugar_expr(['let', *args_list])
+        expanded = self.apply_passes(['let', *args_list])
         self.emit_expr(expanded)
 
     def emit_let_star(self, args_list: List[Any]) -> None:
-        expanded = self._desugar_expr(['let*', *args_list])
+        expanded = self.apply_passes(['let*', *args_list])
         self.emit_expr(expanded)
 
     def emit_letrec(self, args_list: List[Any]) -> None:
-        expanded = self._desugar_expr(['letrec', *args_list])
+        expanded = self.apply_passes(['letrec', *args_list])
         self.emit_expr(expanded)
 
     def emit_quote(self, x: Any) -> None:
@@ -554,7 +608,7 @@ class SchemeToC:
         body_parts = lambda_expr[2:]
         body_parts = self._transform_internal_defines(body_parts)
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
-        actual_body_expr = self._desugar_expr(actual_body_expr)
+        actual_body_expr = self.apply_passes(actual_body_expr)
 
         self.emit_no_colon("{{ // Start LAMBDA scope")
         self.emit("// Compiling LAMBDA with params: {} body: {}", repr(params_list), repr(actual_body_expr))
