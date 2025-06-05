@@ -100,6 +100,24 @@ reg primitive_string_set(reg args_list_obj);
 reg primitive_list_p(reg args_list_obj);
 reg primitive_char_to_integer(reg args_list_obj);
 reg primitive_integer_to_char(reg args_list_obj);
+reg primitive_char_p(reg args_list_obj);
+reg primitive_char_equal(reg args_list_obj);
+reg primitive_char_less(reg args_list_obj);
+reg primitive_char_greater(reg args_list_obj);
+reg primitive_char_less_equal(reg args_list_obj);
+reg primitive_char_greater_equal(reg args_list_obj);
+reg primitive_string_equal(reg args_list_obj);
+reg primitive_string_less(reg args_list_obj);
+reg primitive_string_greater(reg args_list_obj);
+reg primitive_string_less_equal(reg args_list_obj);
+reg primitive_string_greater_equal(reg args_list_obj);
+reg primitive_length(reg args_list_obj);
+reg primitive_make_string_prim(reg args_list_obj);
+reg primitive_string_to_list(reg args_list_obj);
+reg primitive_list_to_string(reg args_list_obj);
+reg primitive_substring(reg args_list_obj);
+reg primitive_string_copy(reg args_list_obj);
+reg primitive_string_fill(reg args_list_obj);
 void set_var_in_env(reg *env_ptr);
 reg *cons_ptr(reg *a, reg *b); // New helper
 reg *alloc_reg();
@@ -398,6 +416,24 @@ void initialize_global_env() {
         reg* list_p_symbol = make_symbol("list?");
         reg* char_to_integer_symbol = make_symbol("char->integer");
         reg* integer_to_char_symbol = make_symbol("integer->char");
+        reg* char_p_symbol = make_symbol("char?");
+        reg* char_eq_symbol = make_symbol("char=?");
+        reg* char_lt_symbol = make_symbol("char<?");
+        reg* char_gt_symbol = make_symbol("char>?");
+        reg* char_le_symbol = make_symbol("char<=?");
+        reg* char_ge_symbol = make_symbol("char>=?");
+        reg* string_eq_symbol = make_symbol("string=?");
+        reg* string_lt_symbol = make_symbol("string<?");
+        reg* string_gt_symbol = make_symbol("string>?");
+        reg* string_le_symbol = make_symbol("string<=?");
+        reg* string_ge_symbol = make_symbol("string>=?");
+        reg* length_symbol = make_symbol("length");
+        reg* make_string_symbol = make_symbol("make-string");
+        reg* string_to_list_symbol = make_symbol("string->list");
+        reg* list_to_string_symbol = make_symbol("list->string");
+        reg* substring_symbol = make_symbol("substring");
+        reg* string_copy_symbol = make_symbol("string-copy");
+        reg* string_fill_symbol = make_symbol("string-fill!");
 
         // List of primitive procedure objects
         reg* plus_prim_obj = alloc_reg(); plus_prim_obj->t = PRIMITIVE_PROC;
@@ -507,6 +543,42 @@ void initialize_global_env() {
         char_to_integer_prim_obj->c_primitive_proc = primitive_char_to_integer;
         reg* integer_to_char_prim_obj = alloc_reg(); integer_to_char_prim_obj->t = PRIMITIVE_PROC;
         integer_to_char_prim_obj->c_primitive_proc = primitive_integer_to_char;
+        reg* char_p_prim_obj = alloc_reg(); char_p_prim_obj->t = PRIMITIVE_PROC;
+        char_p_prim_obj->c_primitive_proc = primitive_char_p;
+        reg* char_eq_prim_obj = alloc_reg(); char_eq_prim_obj->t = PRIMITIVE_PROC;
+        char_eq_prim_obj->c_primitive_proc = primitive_char_equal;
+        reg* char_lt_prim_obj = alloc_reg(); char_lt_prim_obj->t = PRIMITIVE_PROC;
+        char_lt_prim_obj->c_primitive_proc = primitive_char_less;
+        reg* char_gt_prim_obj = alloc_reg(); char_gt_prim_obj->t = PRIMITIVE_PROC;
+        char_gt_prim_obj->c_primitive_proc = primitive_char_greater;
+        reg* char_le_prim_obj = alloc_reg(); char_le_prim_obj->t = PRIMITIVE_PROC;
+        char_le_prim_obj->c_primitive_proc = primitive_char_less_equal;
+        reg* char_ge_prim_obj = alloc_reg(); char_ge_prim_obj->t = PRIMITIVE_PROC;
+        char_ge_prim_obj->c_primitive_proc = primitive_char_greater_equal;
+        reg* string_eq_prim_obj = alloc_reg(); string_eq_prim_obj->t = PRIMITIVE_PROC;
+        string_eq_prim_obj->c_primitive_proc = primitive_string_equal;
+        reg* string_lt_prim_obj = alloc_reg(); string_lt_prim_obj->t = PRIMITIVE_PROC;
+        string_lt_prim_obj->c_primitive_proc = primitive_string_less;
+        reg* string_gt_prim_obj = alloc_reg(); string_gt_prim_obj->t = PRIMITIVE_PROC;
+        string_gt_prim_obj->c_primitive_proc = primitive_string_greater;
+        reg* string_le_prim_obj = alloc_reg(); string_le_prim_obj->t = PRIMITIVE_PROC;
+        string_le_prim_obj->c_primitive_proc = primitive_string_less_equal;
+        reg* string_ge_prim_obj = alloc_reg(); string_ge_prim_obj->t = PRIMITIVE_PROC;
+        string_ge_prim_obj->c_primitive_proc = primitive_string_greater_equal;
+        reg* length_prim_obj = alloc_reg(); length_prim_obj->t = PRIMITIVE_PROC;
+        length_prim_obj->c_primitive_proc = primitive_length;
+        reg* make_string_prim_obj = alloc_reg(); make_string_prim_obj->t = PRIMITIVE_PROC;
+        make_string_prim_obj->c_primitive_proc = primitive_make_string_prim;
+        reg* string_to_list_prim_obj = alloc_reg(); string_to_list_prim_obj->t = PRIMITIVE_PROC;
+        string_to_list_prim_obj->c_primitive_proc = primitive_string_to_list;
+        reg* list_to_string_prim_obj = alloc_reg(); list_to_string_prim_obj->t = PRIMITIVE_PROC;
+        list_to_string_prim_obj->c_primitive_proc = primitive_list_to_string;
+        reg* substring_prim_obj = alloc_reg(); substring_prim_obj->t = PRIMITIVE_PROC;
+        substring_prim_obj->c_primitive_proc = primitive_substring;
+        reg* string_copy_prim_obj = alloc_reg(); string_copy_prim_obj->t = PRIMITIVE_PROC;
+        string_copy_prim_obj->c_primitive_proc = primitive_string_copy;
+        reg* string_fill_prim_obj = alloc_reg(); string_fill_prim_obj->t = PRIMITIVE_PROC;
+        string_fill_prim_obj->c_primitive_proc = primitive_string_fill;
 
         /* DEBUG_VM output omitted for brevity */
 
@@ -551,6 +623,24 @@ void initialize_global_env() {
         prim_symbols = cons(list_p_symbol, prim_symbols);
         prim_symbols = cons(char_to_integer_symbol, prim_symbols);
         prim_symbols = cons(integer_to_char_symbol, prim_symbols);
+        prim_symbols = cons(char_p_symbol, prim_symbols);
+        prim_symbols = cons(char_eq_symbol, prim_symbols);
+        prim_symbols = cons(char_lt_symbol, prim_symbols);
+        prim_symbols = cons(char_gt_symbol, prim_symbols);
+        prim_symbols = cons(char_le_symbol, prim_symbols);
+        prim_symbols = cons(char_ge_symbol, prim_symbols);
+        prim_symbols = cons(string_eq_symbol, prim_symbols);
+        prim_symbols = cons(string_lt_symbol, prim_symbols);
+        prim_symbols = cons(string_gt_symbol, prim_symbols);
+        prim_symbols = cons(string_le_symbol, prim_symbols);
+        prim_symbols = cons(string_ge_symbol, prim_symbols);
+        prim_symbols = cons(length_symbol, prim_symbols);
+        prim_symbols = cons(make_string_symbol, prim_symbols);
+        prim_symbols = cons(string_to_list_symbol, prim_symbols);
+        prim_symbols = cons(list_to_string_symbol, prim_symbols);
+        prim_symbols = cons(substring_symbol, prim_symbols);
+        prim_symbols = cons(string_copy_symbol, prim_symbols);
+        prim_symbols = cons(string_fill_symbol, prim_symbols);
 
         // Construct the list of values
         reg* prim_values = cons(plus_prim_obj, nil_ptr);
@@ -591,6 +681,24 @@ void initialize_global_env() {
         prim_values = cons(list_p_prim_obj, prim_values);
         prim_values = cons(char_to_integer_prim_obj, prim_values);
         prim_values = cons(integer_to_char_prim_obj, prim_values);
+        prim_values = cons(char_p_prim_obj, prim_values);
+        prim_values = cons(char_eq_prim_obj, prim_values);
+        prim_values = cons(char_lt_prim_obj, prim_values);
+        prim_values = cons(char_gt_prim_obj, prim_values);
+        prim_values = cons(char_le_prim_obj, prim_values);
+        prim_values = cons(char_ge_prim_obj, prim_values);
+        prim_values = cons(string_eq_prim_obj, prim_values);
+        prim_values = cons(string_lt_prim_obj, prim_values);
+        prim_values = cons(string_gt_prim_obj, prim_values);
+        prim_values = cons(string_le_prim_obj, prim_values);
+        prim_values = cons(string_ge_prim_obj, prim_values);
+        prim_values = cons(length_prim_obj, prim_values);
+        prim_values = cons(make_string_prim_obj, prim_values);
+        prim_values = cons(string_to_list_prim_obj, prim_values);
+        prim_values = cons(list_to_string_prim_obj, prim_values);
+        prim_values = cons(substring_prim_obj, prim_values);
+        prim_values = cons(string_copy_prim_obj, prim_values);
+        prim_values = cons(string_fill_prim_obj, prim_values);
 
         reg* global_frame = cons(prim_symbols, prim_values);
         env = cons(global_frame, nil_ptr);
@@ -1882,5 +1990,148 @@ reg primitive_integer_to_char(reg args_list_obj) {
     reg arg = *(args_list_obj.car);
     if (arg.t != FIXNUM) { printf("ERROR: integer->char: arg not number\n"); exit(1); }
     return *make_char((char)arg.n);
+}
+
+reg primitive_char_p(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: char?: requires one arg\n"); exit(1); }
+    reg result; result.t = BOOLEAN; result.b = (args_list_obj.car->t == CHAR); return result;
+}
+
+static reg make_char_comparison_result(int cond) {
+    reg r; r.t = BOOLEAN; r.b = cond; return r;
+}
+
+reg primitive_char_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: char=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != CHAR || b.t != CHAR) { printf("ERROR: char=? args not char\n"); exit(1); }
+    return make_char_comparison_result(a.c == b.c);
+}
+
+reg primitive_char_less(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: char<? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != CHAR || b.t != CHAR) { printf("ERROR: char<? args not char\n"); exit(1); }
+    return make_char_comparison_result((unsigned char)a.c < (unsigned char)b.c);
+}
+
+reg primitive_char_greater(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: char>? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != CHAR || b.t != CHAR) { printf("ERROR: char>? args not char\n"); exit(1); }
+    return make_char_comparison_result((unsigned char)a.c > (unsigned char)b.c);
+}
+
+reg primitive_char_less_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: char<=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != CHAR || b.t != CHAR) { printf("ERROR: char<=? args not char\n"); exit(1); }
+    return make_char_comparison_result((unsigned char)a.c <= (unsigned char)b.c);
+}
+
+reg primitive_char_greater_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: char>=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != CHAR || b.t != CHAR) { printf("ERROR: char>=? args not char\n"); exit(1); }
+    return make_char_comparison_result((unsigned char)a.c >= (unsigned char)b.c);
+}
+
+static reg make_string_comparison_result(int cond) { reg r; r.t = BOOLEAN; r.b = cond; return r; }
+
+reg primitive_string_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != STRING || b.t != STRING) { printf("ERROR: string=? args not string\n"); exit(1); }
+    return make_string_comparison_result(strcmp(a.s, b.s) == 0);
+}
+
+reg primitive_string_less(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string<? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != STRING || b.t != STRING) { printf("ERROR: string<? args not string\n"); exit(1); }
+    return make_string_comparison_result(strcmp(a.s, b.s) < 0);
+}
+
+reg primitive_string_greater(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string>? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != STRING || b.t != STRING) { printf("ERROR: string>? args not string\n"); exit(1); }
+    return make_string_comparison_result(strcmp(a.s, b.s) > 0);
+}
+
+reg primitive_string_less_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string<=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != STRING || b.t != STRING) { printf("ERROR: string<=? args not string\n"); exit(1); }
+    return make_string_comparison_result(strcmp(a.s, b.s) <= 0);
+}
+
+reg primitive_string_greater_equal(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string>=? requires two args\n"); exit(1); }
+    reg a = *(args_list_obj.car); reg b = *(args_list_obj.cdr->car);
+    if (a.t != STRING || b.t != STRING) { printf("ERROR: string>=? args not string\n"); exit(1); }
+    return make_string_comparison_result(strcmp(a.s, b.s) >= 0);
+}
+
+reg primitive_length(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: length requires one list arg\n"); exit(1); }
+    reg* cur = args_list_obj.car; int n = 0; while (cur->t == PAIR) { n++; cur = cur->cdr; }
+    if (cur->t != NIL) { printf("ERROR: length: improper list\n"); exit(1); }
+    return *make_number(n);
+}
+
+reg primitive_make_string_prim(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL) { printf("ERROR: make-string requires at least length\n"); exit(1); }
+    reg len_reg = *(args_list_obj.car);
+    if (len_reg.t != FIXNUM) { printf("ERROR: make-string: first arg not number\n"); exit(1); }
+    char fill = ' ';
+    if (args_list_obj.cdr != NULL && args_list_obj.cdr->t == PAIR) {
+        reg ch = *(args_list_obj.cdr->car);
+        if (ch.t != CHAR) { printf("ERROR: make-string: second arg not char\n"); exit(1); }
+        fill = ch.c;
+        if (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL) { printf("ERROR: make-string: too many args\n"); exit(1); }
+    } else if (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL) { printf("ERROR: make-string: too many args\n"); exit(1); }
+    char *buf = GC_MALLOC(len_reg.n + 1); for (long long i=0;i<len_reg.n;i++) buf[i] = fill; buf[len_reg.n] = '\0';
+    return *make_string(buf);
+}
+
+reg primitive_string_to_list(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: string->list requires one arg\n"); exit(1); }
+    reg str = *(args_list_obj.car); if (str.t != STRING) { printf("ERROR: string->list arg not string\n"); exit(1); }
+    reg* head = alloc_reg(); head->t = NIL; reg* tail = head; size_t len = strlen(str.s);
+    for (size_t i=0;i<len;i++) {
+        reg* cell = alloc_reg(); cell->t = PAIR; cell->car = make_char(str.s[i]); cell->cdr = alloc_reg(); cell->cdr->t = NIL;
+        if (tail->t == NIL) { memcpy(tail, cell, sizeof(reg)); } else { tail->cdr = cell; tail = cell; }
+    }
+    return *head;
+}
+
+reg primitive_list_to_string(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: list->string requires one arg\n"); exit(1); }
+    reg* cur = args_list_obj.car; size_t count = 0; reg* tmp = cur; while (tmp->t == PAIR) { if (tmp->car->t != CHAR) { printf("ERROR: list->string: element not char\n"); exit(1); } count++; tmp = tmp->cdr; }
+    if (tmp->t != NIL) { printf("ERROR: list->string: improper list\n"); exit(1); }
+    char *buf = GC_MALLOC(count + 1); size_t i=0; while (cur->t == PAIR) { buf[i++] = cur->car->c; cur = cur->cdr; } buf[count] = '\0';
+    return *make_string(buf);
+}
+
+reg primitive_substring(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || args_list_obj.cdr->cdr == NULL || args_list_obj.cdr->cdr->t != PAIR || args_list_obj.cdr->cdr->car == NULL || (args_list_obj.cdr->cdr->cdr != NULL && args_list_obj.cdr->cdr->cdr->t != NIL)) { printf("ERROR: substring requires string start end\n"); exit(1); }
+    reg str = *(args_list_obj.car); reg start = *(args_list_obj.cdr->car); reg end = *(args_list_obj.cdr->cdr->car);
+    if (str.t != STRING || start.t != FIXNUM || end.t != FIXNUM) { printf("ERROR: substring: wrong types\n"); exit(1); }
+    if (start.n < 0 || end.n < start.n || end.n > (long long)strlen(str.s)) { printf("ERROR: substring: invalid indices\n"); exit(1); }
+    char *buf = GC_MALLOC(end.n - start.n + 1); memcpy(buf, str.s + start.n, end.n - start.n); buf[end.n - start.n] = '\0';
+    return *make_string(buf);
+}
+
+reg primitive_string_copy(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: string-copy requires one arg\n"); exit(1); }
+    reg str = *(args_list_obj.car); if (str.t != STRING) { printf("ERROR: string-copy arg not string\n"); exit(1); }
+    return *make_string(str.s);
+}
+
+reg primitive_string_fill(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL || (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string-fill! requires string and char\n"); exit(1); }
+    reg* strp = args_list_obj.car; reg ch = *(args_list_obj.cdr->car); if (strp->t != STRING || ch.t != CHAR) { printf("ERROR: string-fill!: wrong types\n"); exit(1); }
+    size_t len = strlen(strp->s); for (size_t i=0;i<len;i++) strp->s[i] = ch.c; reg r; r.t = NIL; return r;
 }
 
