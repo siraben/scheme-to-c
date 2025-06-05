@@ -49,18 +49,18 @@ class SchemeToC:
         return x == []
 
     def is_immediate(self, x):
-        return isinstance(x, int) or isinstance(x, bool) or self.is_null(x)
+        return isinstance(x, bool) or isinstance(x, int) or self.is_null(x)
 
     def emit_immediate(self, x):
-        if isinstance(x, int):
-            self.emit("eax.t = FIXNUM")
-            self.emit("eax.n = {}", x)
-        elif isinstance(x, bool):
+        if isinstance(x, bool):
             self.emit("eax.t = BOOLEAN")
             if x:
                 self.emit("eax.b = 1")
             else:
                 self.emit("eax.b = 0")
+        elif isinstance(x, int):
+            self.emit("eax.t = FIXNUM")
+            self.emit("eax.n = {}", x)
         elif self.is_null(x):
             self.emit("eax.t = NIL")
             
@@ -201,6 +201,7 @@ class SchemeToC:
         self.emit_no_colon("void initialize_global_env();")
         self.emit_no_colon("reg *alloc_reg();")
         self.emit_no_colon("void lookup_in_env(reg *env_ptr);")
+        self.emit_no_colon("void set_var_in_env(reg *env_ptr);")
         self.emit_no_colon("// Primitives from vm.c")
         self.emit_no_colon("reg primitive_plus(reg args_list_obj);")
         self.emit_no_colon("reg primitive_zero_p(reg args_list_obj);")
@@ -592,6 +593,7 @@ class SchemeToC:
             self.emit("ebx = tmp_set_val")
             self.emit("eax = *make_symbol(\"{}\");", var_name_str)
             self.emit("set_var_in_env(env)")
+            self.emit("eax = tmp_set_val")
         else:
             self.emit_no_colon("// SET! target is not a symbol: {}", var_name_str)
 
