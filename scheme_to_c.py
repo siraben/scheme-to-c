@@ -65,6 +65,45 @@ class SchemeToC:
         self.gensym_count += 1
         return f"label{self.gensym_count}"
 
+    def gensym_scheme_var(self) -> str:
+        """Generate a unique Scheme variable name for desugaring."""
+        self.gensym_count += 1
+        return f"g{self.gensym_count}"
+
+    def _desugar_or(self, args: List[Any]) -> Any:
+        if not args:
+            return False
+        if len(args) == 1:
+            return self._desugar_expr(args[0])
+        tmp = self.gensym_scheme_var()
+        first = self._desugar_expr(args[0])
+        rest = self._desugar_or(args[1:])
+        return ['let', [[tmp, first]], ['if', tmp, tmp, rest]]
+
+    def _desugar_and(self, args: List[Any]) -> Any:
+        if not args:
+            return True
+        if len(args) == 1:
+            return self._desugar_expr(args[0])
+        tmp = self.gensym_scheme_var()
+        first = self._desugar_expr(args[0])
+        rest = self._desugar_and(args[1:])
+        return ['let', [[tmp, first]], ['if', tmp, rest, tmp]]
+
+    def _desugar_expr(self, x: Any) -> Any:
+        if isinstance(x, list) and x:
+            op = x[0]
+            args = x[1:]
+            if op == 'or':
+                return self._desugar_or(args)
+            if op == 'and':
+                return self._desugar_and(args)
+            return [op] + [self._desugar_expr(arg) for arg in args]
+        elif isinstance(x, list):
+            return []
+        else:
+            return x
+
     def _transform_internal_defines(self, body_parts: List[Any]) -> List[Any]:
         defines: List[Any] = []
         rest: List[Any] = []
@@ -222,7 +261,13 @@ class SchemeToC:
             elif op == 'goto': self.emit_goto(args[0])
             elif op == 'exit': self.emit_exit(args[0])
             elif op == 'cond': self.emit_cond(args)
-            else: 
+            elif op == 'or':
+                expanded = self._desugar_or(args)
+                self.emit_expr(expanded)
+            elif op == 'and':
+                expanded = self._desugar_and(args)
+                self.emit_expr(expanded)
+            else:
                 self.emit_apply(x)
         elif self.is_null(x): 
             self.emit_immediate(x)
@@ -358,6 +403,7 @@ class SchemeToC:
             body_parts = val_expr[2:]
             body_parts = self._transform_internal_defines(body_parts)
             actual_body = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+            actual_body = self._desugar_expr(actual_body)
 
             self.emit("// Defining potentially recursive function {} as {}", var_name_str, repr(actual_body))
             # Storage for the C variable that will hold the closure reg struct.
@@ -512,6 +558,7 @@ class SchemeToC:
         body_parts = lambda_expr[2:]
         body_parts = self._transform_internal_defines(body_parts)
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+        actual_body_expr = self._desugar_expr(actual_body_expr)
 
         self.emit_no_colon("{{ // Start LAMBDA scope")
         self.emit("// Compiling LAMBDA with params: {} body: {}", repr(params_list), repr(actual_body_expr))
