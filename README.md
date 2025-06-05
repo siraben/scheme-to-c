@@ -26,13 +26,18 @@ Also included in this repository:
 
 Compiler overview
 -----------------
-The compiler parses Scheme code and performs several passes:
+The compiler runs a series of small passes. Each pass rewrites a single syntactic feature into more primitive constructs. After parsing the input Scheme we apply the following transformations:
 
-1. **A-normal form** transformation simplifies nested expressions.
-2. **Lambda analysis** collects free variables and converts lambdas
-   into closures with environment structs.
-3. C code is generated that links against `vm.c`, which provides the
-   runtime system and uses the Boehm GC.
+1. **lift_internal_defines** – convert internal `define` forms inside lambdas into an explicit `letrec`.
+2. **desugar_or** – rewrite `(or ...)` into nested `let`/`if` forms.
+3. **desugar_and** – similarly expand `(and ...)`.
+4. **desugar_letrec** – lower `letrec` to a `let` with placeholder bindings and `set!` assignments.
+5. **desugar_letstar** – expand `let*` into chained `let` expressions.
+6. **desugar_let** – translate `let` into an immediate lambda application.
+7. **expand_quasiquote** – turn backquoted expressions into combinations of `cons`, `append` and `quote`.
+8. **desugar_cond** – translate `cond` clauses into nested `if` expressions.
+
+After these passes the intermediate language consists only of core forms such as `lambda`, `if`, `begin`, `set!`, user supplied `label`/`goto`, literals and procedure calls. C code is finally generated that links against `vm.c` which provides the runtime system and uses the Boehm GC.
 
 Running tests
 -------------
@@ -59,7 +64,6 @@ Grammar of input language
          (let* ((<sym> <expr>) ...) <expr>)
          (letrec ((<sym> <expr>) ...) <expr>)
          (set! <sym> <expr>)
-         (cond (<expr> <expr> ...) ...)
          (label <sym>)
          (goto <sym>)
          (<expr> <expr> ...)
