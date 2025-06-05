@@ -708,57 +708,6 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             continue;
         }
 
-        // OR: (or expr1 expr2 ...)
-        if (first_elem.t == SYMBOL && is_symbol_eq(first_elem, "or")) {
-            #ifdef DEBUG_VM
-            printf("DEBUG: eval_scheme_expr - OR: "); write_obj(expr); puts("");
-            #endif
-
-            reg* current_arg_node = expr.cdr; // List of argument expressions
-            reg false_val; false_val.t = BOOLEAN; false_val.b = 0;
-
-            if (current_arg_node == NULL || current_arg_node->t == NIL) { // (or) -> #f
-                #ifdef DEBUG_VM
-                printf("DEBUG: eval_scheme_expr - (or) with no arguments, returning #f\\n");
-                #endif
-                return false_val;
-            }
-
-            if (current_arg_node->t != PAIR) {
-                 printf("ERROR: Malformed or expression - arguments not a proper list.\\n"); exit(1);
-            }
-
-            while(current_arg_node != NULL && current_arg_node->t == PAIR) {
-                if (current_arg_node->car == NULL) {
-                    printf("ERROR: Malformed or - null expression in arguments.\\n"); exit(1);
-                }
-                reg arg_val = eval_scheme_expr(*(current_arg_node->car), current_eval_env);
-                
-                int is_true = 1; // In Scheme, any value other than #f is true.
-                if (arg_val.t == BOOLEAN && arg_val.b == 0) {
-                    is_true = 0;
-                }
-
-                if (is_true) {
-                    #ifdef DEBUG_VM
-                    printf("DEBUG: eval_scheme_expr - OR found true value: "); write_obj(arg_val); puts("");
-                    #endif
-                    return arg_val; // Return the first true value
-                }
-                current_arg_node = current_arg_node->cdr;
-            }
-            // Check if the argument list was proper
-            if (current_arg_node != NULL && current_arg_node->t != NIL) {
-                printf("ERROR: Malformed or expression - improper list of argument expressions\\n");
-                exit(1);
-            }
-
-            // All arguments evaluated to #f, or list was exhausted
-            #ifdef DEBUG_VM
-            printf("DEBUG: eval_scheme_expr - OR all arguments were false, returning #f\\n");
-            #endif
-            return false_val;
-        }
 
         // LAMBDA: (lambda (param...) body-expr)
         // For now, assumes lambda has exactly one body expression.
