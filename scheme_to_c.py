@@ -7,6 +7,8 @@ class SchemeToC:
         self.compile_port = sys.stdout
         self.gensym_count = 0
         self.anf_gensym_count = 0
+        self.lambda_free_vars = {}
+        self.lambda_struct_names = {}
 
     def set_compile_port(self, p):
         if not hasattr(p, 'write'):
@@ -29,7 +31,19 @@ class SchemeToC:
         self.compile_port.write(s)
         
     def sanitize_c_identifier(self, sym_name):
-        return sym_name.replace('-', '_')
+        cleaned = re.sub(r'[^0-9a-zA-Z_]', '_', sym_name)
+        if not re.match(r'^[A-Za-z_]', cleaned):
+            cleaned = '_' + cleaned
+        c_keywords = {
+            'auto','break','case','char','const','continue','default','do','double',
+            'else','enum','extern','float','for','goto','if','inline','int','long',
+            'register','restrict','return','short','signed','sizeof','static',
+            'struct','switch','typedef','union','unsigned','void','volatile',
+            'while','_Bool'
+        }
+        if cleaned in c_keywords:
+            cleaned = 'var_' + cleaned
+        return cleaned
 
     def is_null(self, x):
         return x == []
@@ -58,7 +72,90 @@ class SchemeToC:
         self.anf_gensym_count += 1
         return f"anf_tmp_{self.anf_gensym_count}"
 
+    # --- Closure Analysis Helpers ---
+    def _free_vars(self, expr, bound=None):
+        if bound is None:
+            bound = set()
+
+        if self.is_immediate(expr) or self.is_null(expr):
+            return set()
+
+        if isinstance(expr, str):
+            if expr in bound:
+                return set()
+            return {expr}
+
+        if not isinstance(expr, list) or not expr:
+            return set()
+
+        op = expr[0]
+
+        if op == 'quote':
+            return set()
+        elif op == 'lambda':
+            params = expr[1]
+            body_parts = expr[2:]
+            new_bound = bound | set(params)
+            fvs = set()
+            for part in body_parts:
+                fvs |= self._free_vars(part, new_bound)
+            return fvs
+        elif op == 'let':
+            bindings = expr[1]
+            body_expr = expr[2]
+            new_bound = bound | {var for var, _ in bindings}
+            fvs = set()
+            for _, val in bindings:
+                fvs |= self._free_vars(val, bound)
+            fvs |= self._free_vars(body_expr, new_bound)
+            return fvs
+        elif op == 'define':
+            definition = expr[1]
+            body = expr[2]
+            if isinstance(definition, list) and definition:
+                params = definition[1:]
+                new_bound = bound | {definition[0]}
+                fvs = self._free_vars(['lambda', params, body], new_bound)
+                return fvs
+            else:
+                return self._free_vars(body, bound | {definition})
+        else:
+            fvs = set()
+            for part in expr:
+                fvs |= self._free_vars(part, bound)
+            return fvs
+
+    def _analyze_lambdas(self, expr, bound=None):
+        if bound is None:
+            bound = set()
+
+        if isinstance(expr, list) and expr:
+            op = expr[0]
+            if op == 'lambda':
+                params = expr[1]
+                body_parts = expr[2:]
+                fvs = self._free_vars(expr, bound)
+                self.lambda_free_vars[id(expr)] = list(fvs)
+                self.lambda_struct_names[id(expr)] = f"closure_env_{self.gensym()}"
+                new_bound = bound | set(params)
+                for part in body_parts:
+                    self._analyze_lambdas(part, new_bound)
+            elif op == 'let':
+                bindings = expr[1]
+                body_expr = expr[2]
+                new_bound = bound | {var for var, _ in bindings}
+                for _, val in bindings:
+                    self._analyze_lambdas(val, bound)
+                self._analyze_lambdas(body_expr, new_bound)
+            else:
+                for part in expr:
+                    self._analyze_lambdas(part, bound)
+
+
     def emit_program(self, x_expr):
+        self.lambda_free_vars = {}
+        self.lambda_struct_names = {}
+        self._analyze_lambdas(x_expr)
         self.emit_no_colon("// -- BEGIN GENERATED C PREAMBLE --")
         self.emit_no_colon("#include <stdio.h>")
         self.emit_no_colon("#include <stdlib.h>")
@@ -109,6 +206,23 @@ class SchemeToC:
         self.emit_no_colon("reg primitive_zero_p(reg args_list_obj);")
         self.emit_no_colon("reg primitive_multiply(reg args_list_obj);")
         self.emit_no_colon("reg primitive_sub1(reg args_list_obj);")
+
+        # Emit environment structs for lambdas with captured variables
+        for lam_id, struct_name in self.lambda_struct_names.items():
+            free_vars = self.lambda_free_vars.get(lam_id, [])
+            if not free_vars:
+                continue
+            self.emit_no_colon("")
+            line = "typedef struct {} {{".format(struct_name)
+            line = line.replace("{", "{{").replace("}", "}}").rstrip()
+            self.emit_no_colon(line)
+            for fv in free_vars:
+                c_name = self.sanitize_c_identifier(fv)
+                self.emit_no_colon(f"  reg {c_name};")
+            line2 = "}} {};".format(struct_name)
+            line2 = line2.replace("{", "{{").replace("}", "}}").rstrip()
+            self.emit_no_colon(line2)
+
         self.emit_no_colon("// -- END GENERATED C PREAMBLE --")
         self.emit_no_colon("")
         self.emit_no_colon("int main(void)")
@@ -139,7 +253,7 @@ class SchemeToC:
             elif op == 'let':
                 self.emit_let(args)
             elif op == 'lambda':
-                self.emit_lambda_expr(args)
+                self.emit_lambda_expr(x)
             elif op == 'set!':
                 self.emit_set_bang(args)
             elif op == 'display':
@@ -400,13 +514,40 @@ class SchemeToC:
         self.emit(f"eax = *cons(&{head_tmp}, &ebx)")
 
 
-    def emit_lambda_expr(self, args_list):
-        params_list = args_list[0]
-        body_parts = args_list[1:]
+    def emit_lambda_expr(self, lambda_expr):
+        params_list = lambda_expr[1]
+        body_parts = lambda_expr[2:]
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+
+        free_vars = self.lambda_free_vars.get(id(lambda_expr), [])
 
         self.emit_no_colon("{{ // Start LAMBDA scope")
         self.emit("// Compiling LAMBDA with params: {} body: {}", repr(params_list), repr(actual_body_expr))
+
+        if free_vars:
+            self.emit("// Capturing free vars: {}", repr(free_vars))
+            symbols_var = f"cap_syms_{self.gensym()}"
+            values_var = f"cap_vals_{self.gensym()}"
+            frame_var = f"cap_frame_{self.gensym()}"
+            env_var = f"cap_env_{self.gensym()}"
+            struct_name = self.lambda_struct_names.get(id(lambda_expr))
+            env_struct_var = f"env_struct_{self.gensym()}"
+            self.emit(f"{struct_name}* {env_struct_var} = calloc(1, sizeof({struct_name}))")
+            self.emit("reg* {} = alloc_reg(); {}->t = NIL", symbols_var, symbols_var)
+            self.emit("reg* {} = alloc_reg(); {}->t = NIL", values_var, values_var)
+            for fv in reversed(free_vars):
+                sym_tmp = f"sym_{self.gensym()}"
+                self.emit("reg* {} = make_symbol(\"{}\");", sym_tmp, fv)
+                self.emit("{} = cons({}, {});", symbols_var, sym_tmp, symbols_var)
+                self.emit("eax = *make_symbol(\"{}\");", fv)
+                self.emit("lookup_in_env(env); // capture value")
+                field_name = self.sanitize_c_identifier(fv)
+                self.emit("memcpy(&{}->{}, &eax, sizeof(reg));", env_struct_var, field_name)
+                self.emit("{} = cons(&{}->{}, {});", values_var, env_struct_var, field_name, values_var)
+            self.emit("reg* {} = cons({}, {});", frame_var, symbols_var, values_var)
+            self.emit("reg* {} = cons({}, env);", env_var, frame_var)
+        else:
+            env_var = "env"
 
         self.emit_expr(['quote', params_list])
         self.emit("reg lambda_params_val = eax")
@@ -414,7 +555,7 @@ class SchemeToC:
         self.emit_expr(['quote', actual_body_expr])
         self.emit("reg lambda_body_val = eax")
 
-        self.emit("reg* new_closure_ptr = make_closure(&lambda_params_val, &lambda_body_val, env)")
+        self.emit("reg* new_closure_ptr = make_closure(&lambda_params_val, &lambda_body_val, {} )", env_var)
         self.emit("eax = *new_closure_ptr")
         self.emit_no_colon("}} // End LAMBDA scope")
 
