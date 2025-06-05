@@ -93,6 +93,7 @@ reg primitive_symbol_to_string(reg args_list_obj);
 reg primitive_string_to_symbol(reg args_list_obj);
 reg primitive_string_append(reg args_list_obj);
 reg primitive_number_to_string(reg args_list_obj);
+reg primitive_append(reg args_list_obj);
 void set_var_in_env(reg *env_ptr);
 reg *cons_ptr(reg *a, reg *b); // New helper
 reg *alloc_reg();
@@ -376,6 +377,7 @@ void initialize_global_env() {
         reg* symbol_to_string_symbol = make_symbol("symbol->string");
         reg* string_to_symbol_symbol = make_symbol("string->symbol");
         reg* string_append_symbol = make_symbol("string-append");
+        reg* append_symbol = make_symbol("append");
         reg* number_to_string_symbol = make_symbol("number->string");
 
         // List of primitive procedure objects
@@ -469,6 +471,9 @@ void initialize_global_env() {
         reg* string_append_prim_obj = alloc_reg(); string_append_prim_obj->t = PRIMITIVE_PROC;
         string_append_prim_obj->c_primitive_proc = primitive_string_append;
 
+        reg* append_prim_obj = alloc_reg(); append_prim_obj->t = PRIMITIVE_PROC;
+        append_prim_obj->c_primitive_proc = primitive_append;
+
         reg* number_to_string_prim_obj = alloc_reg(); number_to_string_prim_obj->t = PRIMITIVE_PROC;
         number_to_string_prim_obj->c_primitive_proc = primitive_number_to_string;
 
@@ -507,6 +512,7 @@ void initialize_global_env() {
         prim_symbols = cons(symbol_to_string_symbol, prim_symbols);
         prim_symbols = cons(string_to_symbol_symbol, prim_symbols);
         prim_symbols = cons(string_append_symbol, prim_symbols);
+        prim_symbols = cons(append_symbol, prim_symbols);
         prim_symbols = cons(number_to_string_symbol, prim_symbols);
 
         // Construct the list of values
@@ -540,6 +546,7 @@ void initialize_global_env() {
         prim_values = cons(symbol_to_string_prim_obj, prim_values);
         prim_values = cons(string_to_symbol_prim_obj, prim_values);
         prim_values = cons(string_append_prim_obj, prim_values);
+        prim_values = cons(append_prim_obj, prim_values);
         prim_values = cons(number_to_string_prim_obj, prim_values);
 
         reg* global_frame = cons(prim_symbols, prim_values);
@@ -1867,6 +1874,60 @@ reg primitive_string_append(reg args_list_obj) {
     }
     reg* r = make_string(buf);
     return *r;
+}
+
+reg primitive_append(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR ||
+        args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) {
+        printf("ERROR: append: requires exactly two list arguments\n");
+        exit(1);
+    }
+
+    reg *lst1 = args_list_obj.car;
+    reg *lst2 = args_list_obj.cdr->car;
+
+    if (lst1->t == NIL) {
+        reg *copy = alloc_reg();
+        memcpy(copy, lst2, sizeof(reg));
+        return *copy;
+    }
+
+    if (lst1->t != PAIR) {
+        printf("ERROR: append: first argument not list\n");
+        exit(1);
+    }
+
+    reg *head_copy = NULL;
+    reg *tail_copy = NULL;
+    reg *cur = lst1;
+
+    while (cur->t == PAIR) {
+        reg *new_car = alloc_reg();
+        memcpy(new_car, cur->car, sizeof(reg));
+        reg *new_pair = alloc_reg();
+        new_pair->t = PAIR;
+        new_pair->car = new_car;
+        new_pair->cdr = alloc_reg();
+        new_pair->cdr->t = NIL;
+
+        if (!head_copy) {
+            head_copy = new_pair;
+        } else {
+            tail_copy->cdr = new_pair;
+        }
+        tail_copy = new_pair;
+        cur = cur->cdr;
+    }
+
+    if (cur->t != NIL) {
+        printf("ERROR: append: improper list as first argument\n");
+        exit(1);
+    }
+
+    tail_copy->cdr = lst2;
+    return *head_copy;
 }
 
 reg primitive_number_to_string(reg args_list_obj) {
