@@ -94,6 +94,12 @@ reg primitive_string_to_symbol(reg args_list_obj);
 reg primitive_string_append(reg args_list_obj);
 reg primitive_number_to_string(reg args_list_obj);
 reg primitive_append(reg args_list_obj);
+reg primitive_string_length(reg args_list_obj);
+reg primitive_string_ref(reg args_list_obj);
+reg primitive_string_set(reg args_list_obj);
+reg primitive_list_p(reg args_list_obj);
+reg primitive_char_to_integer(reg args_list_obj);
+reg primitive_integer_to_char(reg args_list_obj);
 void set_var_in_env(reg *env_ptr);
 reg *cons_ptr(reg *a, reg *b); // New helper
 reg *alloc_reg();
@@ -275,6 +281,13 @@ reg *make_string(char *name) {
   return res;
 }
 
+reg *make_char(char ch) {
+  reg *res = alloc_reg();
+  res->t = CHAR;
+  res->c = ch;
+  return res;
+}
+
 void lookup_in_frame(reg *frame)
 {
   // assume that eax contains the symbol to look for
@@ -379,6 +392,12 @@ void initialize_global_env() {
         reg* string_append_symbol = make_symbol("string-append");
         reg* append_symbol = make_symbol("append");
         reg* number_to_string_symbol = make_symbol("number->string");
+        reg* string_length_symbol = make_symbol("string-length");
+        reg* string_ref_symbol = make_symbol("string-ref");
+        reg* string_set_symbol = make_symbol("string-set!");
+        reg* list_p_symbol = make_symbol("list?");
+        reg* char_to_integer_symbol = make_symbol("char->integer");
+        reg* integer_to_char_symbol = make_symbol("integer->char");
 
         // List of primitive procedure objects
         reg* plus_prim_obj = alloc_reg(); plus_prim_obj->t = PRIMITIVE_PROC;
@@ -476,6 +495,18 @@ void initialize_global_env() {
 
         reg* number_to_string_prim_obj = alloc_reg(); number_to_string_prim_obj->t = PRIMITIVE_PROC;
         number_to_string_prim_obj->c_primitive_proc = primitive_number_to_string;
+        reg* string_length_prim_obj = alloc_reg(); string_length_prim_obj->t = PRIMITIVE_PROC;
+        string_length_prim_obj->c_primitive_proc = primitive_string_length;
+        reg* string_ref_prim_obj = alloc_reg(); string_ref_prim_obj->t = PRIMITIVE_PROC;
+        string_ref_prim_obj->c_primitive_proc = primitive_string_ref;
+        reg* string_set_prim_obj = alloc_reg(); string_set_prim_obj->t = PRIMITIVE_PROC;
+        string_set_prim_obj->c_primitive_proc = primitive_string_set;
+        reg* list_p_prim_obj = alloc_reg(); list_p_prim_obj->t = PRIMITIVE_PROC;
+        list_p_prim_obj->c_primitive_proc = primitive_list_p;
+        reg* char_to_integer_prim_obj = alloc_reg(); char_to_integer_prim_obj->t = PRIMITIVE_PROC;
+        char_to_integer_prim_obj->c_primitive_proc = primitive_char_to_integer;
+        reg* integer_to_char_prim_obj = alloc_reg(); integer_to_char_prim_obj->t = PRIMITIVE_PROC;
+        integer_to_char_prim_obj->c_primitive_proc = primitive_integer_to_char;
 
         /* DEBUG_VM output omitted for brevity */
 
@@ -514,6 +545,12 @@ void initialize_global_env() {
         prim_symbols = cons(string_append_symbol, prim_symbols);
         prim_symbols = cons(append_symbol, prim_symbols);
         prim_symbols = cons(number_to_string_symbol, prim_symbols);
+        prim_symbols = cons(string_length_symbol, prim_symbols);
+        prim_symbols = cons(string_ref_symbol, prim_symbols);
+        prim_symbols = cons(string_set_symbol, prim_symbols);
+        prim_symbols = cons(list_p_symbol, prim_symbols);
+        prim_symbols = cons(char_to_integer_symbol, prim_symbols);
+        prim_symbols = cons(integer_to_char_symbol, prim_symbols);
 
         // Construct the list of values
         reg* prim_values = cons(plus_prim_obj, nil_ptr);
@@ -548,6 +585,12 @@ void initialize_global_env() {
         prim_values = cons(string_append_prim_obj, prim_values);
         prim_values = cons(append_prim_obj, prim_values);
         prim_values = cons(number_to_string_prim_obj, prim_values);
+        prim_values = cons(string_length_prim_obj, prim_values);
+        prim_values = cons(string_ref_prim_obj, prim_values);
+        prim_values = cons(string_set_prim_obj, prim_values);
+        prim_values = cons(list_p_prim_obj, prim_values);
+        prim_values = cons(char_to_integer_prim_obj, prim_values);
+        prim_values = cons(integer_to_char_prim_obj, prim_values);
 
         reg* global_frame = cons(prim_symbols, prim_values);
         env = cons(global_frame, nil_ptr);
@@ -1782,5 +1825,62 @@ reg primitive_number_to_string(reg args_list_obj) {
     snprintf(buf, sizeof(buf), "%lld", arg.n);
     reg* r = make_string(buf);
     return *r;
+}
+
+reg primitive_string_length(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: string-length requires one arg\n"); exit(1); }
+    reg arg = *(args_list_obj.car);
+    if (arg.t != STRING) { printf("ERROR: string-length: arg not string\n"); exit(1); }
+    reg* r = make_number(strlen(arg.s));
+    return *r;
+}
+
+reg primitive_string_ref(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) { printf("ERROR: string-ref requires two args\n"); exit(1); }
+    reg str = *(args_list_obj.car);
+    reg idx = *(args_list_obj.cdr->car);
+    if (str.t != STRING || idx.t != FIXNUM) { printf("ERROR: string-ref: wrong types\n"); exit(1); }
+    if (idx.n < 0 || idx.n >= (long long)strlen(str.s)) { printf("ERROR: string-ref: index out of range\n"); exit(1); }
+    return *make_char(str.s[idx.n]);
+}
+
+reg primitive_string_set(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        args_list_obj.cdr->cdr == NULL || args_list_obj.cdr->cdr->t != PAIR || args_list_obj.cdr->cdr->car == NULL ||
+        (args_list_obj.cdr->cdr->cdr != NULL && args_list_obj.cdr->cdr->cdr->t != NIL)) { printf("ERROR: string-set! requires three args\n"); exit(1); }
+    reg* strp = args_list_obj.car;
+    reg idx = *(args_list_obj.cdr->car);
+    reg ch = *(args_list_obj.cdr->cdr->car);
+    if (strp->t != STRING || idx.t != FIXNUM || ch.t != CHAR) { printf("ERROR: string-set!: wrong types\n"); exit(1); }
+    if (idx.n < 0 || idx.n >= (long long)strlen(strp->s)) { printf("ERROR: string-set!: index out of range\n"); exit(1); }
+    strp->s[idx.n] = ch.c;
+    reg r; r.t = NIL; return r;
+}
+
+reg primitive_list_p(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: list?: requires one arg\n"); exit(1); }
+    reg* cur = args_list_obj.car;
+    while (cur->t == PAIR) cur = cur->cdr;
+    reg result; result.t = BOOLEAN; result.b = (cur->t == NIL);
+    return result;
+}
+
+reg primitive_char_to_integer(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: char->integer requires one arg\n"); exit(1); }
+    reg arg = *(args_list_obj.car);
+    if (arg.t != CHAR) { printf("ERROR: char->integer: arg not char\n"); exit(1); }
+    reg* r = make_number((unsigned char)arg.c);
+    return *r;
+}
+
+reg primitive_integer_to_char(reg args_list_obj) {
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL || (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) { printf("ERROR: integer->char requires one arg\n"); exit(1); }
+    reg arg = *(args_list_obj.car);
+    if (arg.t != FIXNUM) { printf("ERROR: integer->char: arg not number\n"); exit(1); }
+    return *make_char((char)arg.n);
 }
 
