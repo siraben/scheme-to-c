@@ -142,7 +142,7 @@ print_pair:
     printf(")");
   }
   if (obj->type == STRING) {
-    printf("\"%s\"", obj->string);
+    printf("%s", obj->string);
   }
   if (obj->type == CLOSURE) {
     printf("#<CLOSURE>");
