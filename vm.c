@@ -42,53 +42,17 @@ typedef struct reg {
 int al;
 reg eax, ebx;
 
-typedef struct llist {
-  reg curr;
-  struct llist *next;
-} llist;
 
-llist *stack = 0;
-
-// Push eax onto stack
-void push() {
-  llist *head, *prev = stack;
-  head = malloc(sizeof(llist));
-  head->curr = eax;
-  head->next = prev;
-  stack = head;
-}
-
-// Replace eax with top of stack
-void pop() {
-  llist *tail = stack->next;
-  eax = stack->curr;
-  stack = tail;
-}
-
-// Compare contents of eax with top of stack
-void cmp() {
-  ebx = eax;
-  pop();
-  if (eax.t != ebx.t) {
-        // type mismatch
-    al = 0;
-  } else {
-    if (eax.t == BOOLEAN) {
-      al = (eax.b == ebx.b);
-    } else if (eax.t == FIXNUM) {
-      al = (eax.n == ebx.n);
-    } else if (eax.t == CHAR) {
-      al = (eax.c == ebx.c);
-    } else if (eax.t == NIL) {
-      al = (eax.t == ebx.t);
-    } else if (eax.t == SYMBOL) {
-      if (ebx.t == SYMBOL) {
-        al = (strncmp(eax.s, ebx.s, MAX_SYMBOL_LEN - 1) == 0);
-      }
-    }
+int reg_equal(reg a, reg b) {
+  if (a.t != b.t) return 0;
+  switch (a.t) {
+    case BOOLEAN: return a.b == b.b;
+    case FIXNUM: return a.n == b.n;
+    case CHAR: return a.c == b.c;
+    case NIL: return 1;
+    case SYMBOL: return strncmp(a.s, b.s, MAX_SYMBOL_LEN - 1) == 0;
+    default: return 0;
   }
-  eax.t = BOOLEAN;
-  eax.b = al;
 }
 
 void write_obj(reg r);
@@ -285,16 +249,11 @@ void lookup_in_frame(reg *frame)
   for(; var->t != NIL || binding->t != NIL;
       var = cdr(var), binding = cdr(binding))
   {
-    eax = *car(var);
-    push();
-    eax = symbol;
-    cmp();
-    if (al == 1) {
-      // We found the symbol, "return" the binding in eax.
+    if (reg_equal(*car(var), symbol)) {
       eax = *car(binding);
+      al = 1;
       return;
     }
-    // Failed, reloop
   }
   al = 0;
 }
@@ -310,7 +269,6 @@ void lookup_in_env(reg *env)
     frame = car(env);
     eax = symbol;
     lookup_in_frame(frame);
-    // Succeeded.
     if (al == 1) {
       return;
     }
@@ -420,6 +378,7 @@ void initialize_global_env() {
     }
 }
 
+#if 0
 int vm_test_main(int argc, char const *argv[])
 {
   initialize_global_env();
@@ -574,6 +533,7 @@ int vm_test_main(int argc, char const *argv[])
   puts("");
   return 0;
 }
+#endif
 
 reg* make_closure(reg* params, reg* body_expr, reg* captured_env) {
     reg* closure_obj = alloc_reg(); // Use existing helper for allocation
