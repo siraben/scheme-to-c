@@ -65,6 +65,39 @@ class SchemeToC:
         self.gensym_count += 1
         return f"label{self.gensym_count}"
 
+    def _transform_internal_defines(self, body_parts: List[Any]) -> List[Any]:
+        defines: List[Any] = []
+        rest: List[Any] = []
+        collecting_defines = True
+        for expr in body_parts:
+            if collecting_defines and isinstance(expr, list) and expr and expr[0] == 'define':
+                defines.append(expr)
+            else:
+                collecting_defines = False
+                rest.append(expr)
+
+        if not defines:
+            return body_parts
+
+        bindings: List[List[Any]] = []
+        for d in defines:
+            if not isinstance(d, list) or len(d) < 2:
+                continue
+            definition = d[1]
+            value_parts = d[2:]
+            if isinstance(definition, list) and definition:
+                name = definition[0]
+                params = definition[1:]
+                val_expr = ['lambda', params, *value_parts]
+            else:
+                name = definition
+                val_expr = value_parts[0] if len(value_parts) == 1 else ['begin'] + value_parts
+            bindings.append([name, val_expr])
+
+        let_bindings = bindings
+        expr = ['let', let_bindings, *rest]
+        return [expr]
+
 
 
 
@@ -293,14 +326,15 @@ class SchemeToC:
 
     def emit_define(self, args_list: List[Any]) -> None:
         definition = args_list[0]
-        body_expr = args_list[1]
+        body_parts = args_list[1:]
 
         if isinstance(definition, str):
+            body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
             self.emit_define_var([definition, body_expr])
         elif isinstance(definition, list) and definition:
             func_name = definition[0]
             params = definition[1:]
-            lambda_expr = ['lambda', params, body_expr]
+            lambda_expr = ['lambda', params, *body_parts]
             self.emit_define_var([func_name, lambda_expr])
         else:
             self.emit_no_colon("// ERROR: Malformed define expression.")
@@ -320,6 +354,7 @@ class SchemeToC:
         if is_lambda_def:
             lambda_params = val_expr[1]
             body_parts = val_expr[2:]
+            body_parts = self._transform_internal_defines(body_parts)
             actual_body = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
 
             self.emit("// Defining potentially recursive function {} as {}", var_name_str, repr(actual_body))
@@ -445,6 +480,7 @@ class SchemeToC:
     def emit_lambda_expr(self, lambda_expr: List[Any]) -> None:
         params_list = lambda_expr[1]
         body_parts = lambda_expr[2:]
+        body_parts = self._transform_internal_defines(body_parts)
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
 
         self.emit_no_colon("{{ // Start LAMBDA scope")
