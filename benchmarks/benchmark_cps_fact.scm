@@ -1,0 +1,5 @@
+(define (fact n k)
+  (if (= n 0)
+      (k 1)
+      (fact (- n 1) (lambda (r) (k (* n r))))))
+(display (fact 200 (lambda (x) x)))

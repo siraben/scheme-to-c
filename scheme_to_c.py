@@ -1,16 +1,12 @@
 import sys
-import re
-import io
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, TextIO
 
 class SchemeToC:
     def __init__(self) -> None:
         self.compile_port: TextIO = sys.stdout
         self.gensym_count: int = 0
-        self.anf_gensym_count: int = 0
-        self.lambda_free_vars: Dict[int, List[str]] = {}
-        self.lambda_struct_names: Dict[int, str] = {}
         self.nesting_level: int = 0
+        self.name_map: Dict[str, str] = {}
 
     def set_compile_port(self, p: TextIO) -> None:
         if not hasattr(p, 'write'):
@@ -32,20 +28,11 @@ class SchemeToC:
         s = fmt_str.format(*f_args)
         self.compile_port.write(s)
         
-    def sanitize_c_identifier(self, sym_name: str) -> str:
-        cleaned = re.sub(r'[^0-9a-zA-Z_]', '_', sym_name)
-        if not re.match(r'^[A-Za-z_]', cleaned):
-            cleaned = '_' + cleaned
-        c_keywords = {
-            'auto','break','case','char','const','continue','default','do','double',
-            'else','enum','extern','float','for','goto','if','inline','int','long',
-            'register','restrict','return','short','signed','sizeof','static',
-            'struct','switch','typedef','union','unsigned','void','volatile',
-            'while','_Bool'
-        }
-        if cleaned in c_keywords:
-            cleaned = 'var_' + cleaned
-        return cleaned
+
+    def get_safe_name(self, sym_name: str) -> str:
+        if sym_name not in self.name_map:
+            self.name_map[sym_name] = f"v_{len(self.name_map)}"
+        return self.name_map[sym_name]
 
     def is_null(self, x: Any) -> bool:
         return x == []
@@ -78,141 +65,11 @@ class SchemeToC:
         self.gensym_count += 1
         return f"label{self.gensym_count}"
 
-    def anf_gensym(self) -> str:
-        self.anf_gensym_count += 1
-        return f"anf_tmp_{self.anf_gensym_count}"
 
-    # --- Closure Analysis Helpers ---
-    def _free_vars(self, expr: Any, bound: Optional[Set[str]] = None) -> Set[str]:
-        if bound is None:
-            bound = set()
-
-        if self.is_immediate(expr) or self.is_null(expr):
-            return set()
-
-        if isinstance(expr, str):
-            if expr in bound:
-                return set()
-            return {expr}
-
-        if not isinstance(expr, list) or not expr:
-            return set()
-
-        op = expr[0]
-
-        if op == 'quote':
-            return set()
-        elif op == 'lambda':
-            params = expr[1]
-            body_parts = expr[2:]
-            if isinstance(params, list):
-                params_set = set(params)
-            else:
-                params_set = {params}
-            new_bound = bound | params_set
-            fvs = set()
-            for part in body_parts:
-                fvs |= self._free_vars(part, new_bound)
-            return fvs
-        elif op == 'let':
-            bindings = expr[1]
-            body_expr = expr[2]
-            new_bound = bound | {var for var, _ in bindings}
-            fvs = set()
-            for _, val in bindings:
-                fvs |= self._free_vars(val, bound)
-            fvs |= self._free_vars(body_expr, new_bound)
-            return fvs
-        elif op == 'let*':
-            bindings = expr[1]
-            body_exprs = expr[2:]
-            new_bound = bound
-            fvs = set()
-            for var, val in bindings:
-                fvs |= self._free_vars(val, new_bound)
-                new_bound = new_bound | {var}
-            for b in body_exprs:
-                fvs |= self._free_vars(b, new_bound)
-            return fvs
-        elif op == 'letrec':
-            bindings = expr[1]
-            body_exprs = expr[2:]
-            new_bound = bound | {var for var, _ in bindings}
-            fvs = set()
-            for _, val in bindings:
-                fvs |= self._free_vars(val, new_bound)
-            for b in body_exprs:
-                fvs |= self._free_vars(b, new_bound)
-            return fvs
-        elif op == 'if':
-            return (self._free_vars(expr[1], bound) |
-                    self._free_vars(expr[2], bound) |
-                    self._free_vars(expr[3], bound))
-        elif op == 'begin':
-            fvs = set()
-            for b in expr[1:]:
-                fvs |= self._free_vars(b, bound)
-            return fvs
-        elif op == 'set!':
-            var = expr[1]
-            val = expr[2]
-            fvs = set()
-            if var not in bound:
-                fvs.add(var)
-            fvs |= self._free_vars(val, bound)
-            return fvs
-        elif op == 'define':
-            definition = expr[1]
-            body = expr[2]
-            if isinstance(definition, list) and definition:
-                params = definition[1:]
-                new_bound = bound | {definition[0]}
-                fvs = self._free_vars(['lambda', params, body], new_bound)
-                return fvs
-            else:
-                return self._free_vars(body, bound | {definition})
-        else:
-            fvs = set()
-            for part in expr:
-                fvs |= self._free_vars(part, bound)
-            return fvs
-
-    def _analyze_lambdas(self, expr: Any, bound: Optional[Set[str]] = None) -> None:
-        if bound is None:
-            bound = set()
-
-        if isinstance(expr, list) and expr:
-            op = expr[0]
-            if op == 'lambda':
-                params = expr[1]
-                body_parts = expr[2:]
-                fvs = self._free_vars(expr, bound)
-                self.lambda_free_vars[id(expr)] = list(fvs)
-                self.lambda_struct_names[id(expr)] = f"closure_env_{self.gensym()}"
-                if isinstance(params, list):
-                    params_set = set(params)
-                else:
-                    params_set = {params}
-                new_bound = bound | params_set
-                for part in body_parts:
-                    self._analyze_lambdas(part, new_bound)
-            elif op == 'let':
-                bindings = expr[1]
-                body_expr = expr[2]
-                new_bound = bound | {var for var, _ in bindings}
-                for _, val in bindings:
-                    self._analyze_lambdas(val, bound)
-                self._analyze_lambdas(body_expr, new_bound)
-            else:
-                for part in expr:
-                    self._analyze_lambdas(part, bound)
 
 
     def emit_program(self, x_expr: Any) -> None:
-        self.lambda_free_vars = {}
-        self.lambda_struct_names = {}
         self.nesting_level = 0
-        self._analyze_lambdas(x_expr)
         self.emit_no_colon("// -- BEGIN GENERATED C PREAMBLE --")
         self.emit_no_colon("#include <stdio.h>")
         self.emit_no_colon("#include <stdlib.h>")
@@ -265,21 +122,6 @@ class SchemeToC:
         self.emit_no_colon("reg primitive_multiply(reg args_list_obj);")
         self.emit_no_colon("reg primitive_sub1(reg args_list_obj);")
 
-        # Emit environment structs for lambdas with captured variables
-        for lam_id, struct_name in self.lambda_struct_names.items():
-            free_vars = self.lambda_free_vars.get(lam_id, [])
-            if not free_vars:
-                continue
-            self.emit_no_colon("")
-            line = "typedef struct {} {{".format(struct_name)
-            line = line.replace("{", "{{").replace("}", "}}").rstrip()
-            self.emit_no_colon(line)
-            for fv in free_vars:
-                c_name = self.sanitize_c_identifier(fv)
-                self.emit_no_colon(f"  reg {c_name};")
-            line2 = "}} {};".format(struct_name)
-            line2 = line2.replace("{", "{{").replace("}", "}}").rstrip()
-            self.emit_no_colon(line2)
 
         self.emit_no_colon("// -- END GENERATED C PREAMBLE --")
         self.emit_no_colon("")
@@ -310,6 +152,10 @@ class SchemeToC:
                 self.emit_define(args)
             elif op == 'let':
                 self.emit_let(args)
+            elif op == 'let*':
+                self.emit_let_star(args)
+            elif op == 'letrec':
+                self.emit_letrec(args)
             elif op == 'lambda':
                 self.emit_lambda_expr(x)
             elif op == 'set!':
@@ -465,7 +311,7 @@ class SchemeToC:
         var_name_str = expr_parts[0]
         val_expr = expr_parts[1]
         
-        c_var_name = self.sanitize_c_identifier(var_name_str)
+        c_var_name = self.get_safe_name(var_name_str)
         scheme_var_name = var_name_str
 
         is_lambda_def = isinstance(val_expr, list) and val_expr and val_expr[0] == 'lambda'
@@ -479,7 +325,6 @@ class SchemeToC:
             self.emit("// Defining potentially recursive function {} as {}", var_name_str, repr(actual_body))
             # Storage for the C variable that will hold the closure reg struct.
             # This is distinct from _storage which holds the reg struct itself if allocated separately.
-            self.emit("reg {}_c_var; // C host variable for the closure", c_var_name)
             # Storage for the closure reg struct itself, to allow self-reference.
             self.emit("reg* {}_storage = alloc_reg();", c_var_name)
 
@@ -503,15 +348,14 @@ class SchemeToC:
             self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg));", c_var_name, c_var_name)
             
             self.emit("// 3. Add this closure (now in *{}_storage) to the global environment under its name '{}'.", c_var_name, scheme_var_name)
-            self.emit("{}_c_var = *{}_storage; // Load the closure struct value into the C host var", c_var_name, c_var_name)
             self.emit_add_var_to_global_vm_env_ptr(scheme_var_name, f"{c_var_name}_storage")
             
             if is_top_level:
                 self.emit("{}_storage->env = NULL;", c_var_name)
-                self.emit("{}_c_var.env = NULL;", c_var_name)
+                pass
             else:
                 self.emit("{}_storage->env = env;", c_var_name)
-                self.emit("{}_c_var.env = env;", c_var_name)
+                pass
 
             self.emit("// End defining {}", var_name_str)
         else: 
@@ -526,13 +370,13 @@ class SchemeToC:
             # This means a C variable var_c_var is created and initialized from eax,
             # but "eax" (containing the same value) is passed to add_to_env.
             # So env gets a copy of the value, not a reference to var_c_var.
-            self.emit("reg {}_c_var = eax; // C host variable (optional, for inspection)", c_var_name)
-            self.emit_add_var_to_global_vm_env(scheme_var_name, "eax") 
+            self.emit_add_var_to_global_vm_env(scheme_var_name, "eax")
             self.emit("// End defining simple global {}", var_name_str)
 
     def emit_let(self, args_list: List[Any]) -> None:
         var_bindings = args_list[0]
-        body_expr = args_list[1]
+        body_parts = args_list[1:]
+        body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
 
         self.emit_no_colon("{{ // Start LET scope")
         self.nesting_level += 1
@@ -543,6 +387,26 @@ class SchemeToC:
         self.emit_expr(body_expr)
         self.nesting_level -= 1
         self.emit_no_colon("}} // End LET scope")
+
+    def emit_let_star(self, args_list: List[Any]) -> None:
+        bindings = args_list[0]
+        body_parts = args_list[1:]
+        body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
+        expr = body_expr
+        for var, val in reversed(bindings):
+            expr = ['let', [[var, val]], expr]
+        self.emit_expr(expr)
+
+    def emit_letrec(self, args_list: List[Any]) -> None:
+        bindings = args_list[0]
+        body_parts = args_list[1:]
+        placeholder = ['quote', []]
+        let_bindings = [[var, placeholder] for var, _ in bindings]
+        set_forms = [['set!', var, val] for var, val in bindings]
+        body_core_forms = set_forms + body_parts
+        body_expr = body_core_forms[0] if len(body_core_forms) == 1 else ['begin'] + body_core_forms
+        expr = ['let', let_bindings, body_expr]
+        self.emit_expr(expr)
 
     def emit_quote(self, x: Any) -> None:
         if self.is_null(x):
@@ -583,35 +447,9 @@ class SchemeToC:
         body_parts = lambda_expr[2:]
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
 
-        free_vars = self.lambda_free_vars.get(id(lambda_expr), [])
-
         self.emit_no_colon("{{ // Start LAMBDA scope")
         self.emit("// Compiling LAMBDA with params: {} body: {}", repr(params_list), repr(actual_body_expr))
-
-        if free_vars:
-            self.emit("// Capturing free vars: {}", repr(free_vars))
-            symbols_var = f"cap_syms_{self.gensym()}"
-            values_var = f"cap_vals_{self.gensym()}"
-            frame_var = f"cap_frame_{self.gensym()}"
-            env_var = f"cap_env_{self.gensym()}"
-            struct_name = self.lambda_struct_names.get(id(lambda_expr))
-            env_struct_var = f"env_struct_{self.gensym()}"
-            self.emit(f"{struct_name}* {env_struct_var} = calloc(1, sizeof({struct_name}))")
-            self.emit("reg* {} = alloc_reg(); {}->t = NIL", symbols_var, symbols_var)
-            self.emit("reg* {} = alloc_reg(); {}->t = NIL", values_var, values_var)
-            for fv in reversed(free_vars):
-                sym_tmp = f"sym_{self.gensym()}"
-                self.emit("reg* {} = make_symbol(\"{}\");", sym_tmp, fv)
-                self.emit("{} = cons({}, {});", symbols_var, sym_tmp, symbols_var)
-                self.emit("eax = *make_symbol(\"{}\");", fv)
-                self.emit("lookup_in_env(env); // capture value")
-                field_name = self.sanitize_c_identifier(fv)
-                self.emit("memcpy(&{}->{}, &eax, sizeof(reg));", env_struct_var, field_name)
-                self.emit("{} = cons(&{}->{}, {});", values_var, env_struct_var, field_name, values_var)
-            self.emit("reg* {} = cons({}, {});", frame_var, symbols_var, values_var)
-            self.emit("reg* {} = cons({}, env);", env_var, frame_var)
-        else:
-            env_var = "env"
+        env_var = "env"
 
         self.emit_expr(['quote', params_list])
         self.emit("reg lambda_params_val = eax")
@@ -725,91 +563,6 @@ class SchemeToC:
             self.emit_expr(arg_val) # Evaluate if it's an expr
             self.emit("exit(eax.n) // Attempting to exit with evaluated expr")
 
-    # --- ANF Transformation ---
-    def _anf_atomic(self, expr: Any) -> bool:
-        return not isinstance(expr, list) or expr == [] or (
-            isinstance(expr, list) and expr and expr[0] == 'quote'
-        )
-
-    def anf_transform(self, expr: Any) -> Any:
-        self.anf_gensym_count = 0
-        return self._anf(expr)
-
-    def _anf(self, expr: Any) -> Any:
-        if self._anf_atomic(expr):
-            return expr
-
-        if not isinstance(expr, list):
-            return expr
-
-        op = expr[0]
-
-        if op == 'begin':
-            return ['begin'] + [self._anf(e) for e in expr[1:]]
-        elif op == 'if':
-            return ['if', self._anf(expr[1]), self._anf(expr[2]), self._anf(expr[3])]
-        elif op == 'lambda':
-            params = expr[1]
-            body = [self._anf(e) for e in expr[2:]]
-            return ['lambda', params] + body
-        elif op == 'let':
-            bindings = [[var, self._anf(val)] for var, val in expr[1]]
-            body_parts = [self._anf(e) for e in expr[2:]]
-            if len(body_parts) == 1:
-                body_expr = body_parts[0]
-            else:
-                body_expr = ['begin'] + body_parts
-            return ['let', bindings, body_expr]
-        elif op == 'let*':
-            bindings = expr[1]
-            body_parts = expr[2:]
-            body_core = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
-            result = body_core
-            for var, val in reversed(bindings):
-                result = ['let', [[var, val]], result]
-            return self._anf(result)
-        elif op == 'letrec':
-            bindings = expr[1]
-            body_parts = expr[2:]
-            placeholder = ['quote', []]
-            let_bindings = [[var, placeholder] for var, _ in bindings]
-            set_forms = [['set!', var, val] for var, val in bindings]
-            body_core_forms = set_forms + body_parts
-            body_core = body_core_forms[0] if len(body_core_forms) == 1 else ['begin'] + body_core_forms
-            return self._anf(['let', let_bindings, body_core])
-        elif op == 'define':
-            definition = expr[1]
-            body = self._anf(expr[2])
-            return ['define', definition, body]
-        elif op == 'set!':
-            return ['set!', expr[1], self._anf(expr[2])]
-        elif op == 'cond':
-            clauses = []
-            for clause in expr[1:]:
-                if not isinstance(clause, list):
-                    clauses.append([self._anf(clause)])
-                    continue
-                transformed = [self._anf(clause[0])]
-                transformed.extend(self._anf(e) for e in clause[1:])
-                clauses.append(transformed)
-            return ['cond'] + clauses
-        else:
-            args = expr[1:]
-            new_args = []
-            bindings = []
-            for arg in args:
-                arg_t = self._anf(arg)
-                if self._anf_atomic(arg_t):
-                    new_args.append(arg_t)
-                else:
-                    tmp = self.anf_gensym()
-                    bindings.append([tmp, arg_t])
-                    new_args.append(tmp)
-            core = [op] + new_args
-            if not bindings:
-                return core
-            else:
-                return ['let', bindings, core]
 
 
     # --- Parser specific methods ---
@@ -913,18 +666,17 @@ if __name__ == '__main__':
     input_scm_file = sys.argv[1]
     compiler = SchemeToC()
     parsed_program = compiler.parse_scheme_file(input_scm_file)
-    anf_program = compiler.anf_transform(parsed_program)
 
     if len(sys.argv) >= 3:
         output_c_file = sys.argv[2]
         try:
             with open(output_c_file, 'w') as f_out:
                 compiler.set_compile_port(f_out)
-                compiler.emit_program(anf_program)
+                compiler.emit_program(parsed_program)
             print(f"Python compiler: Generated {output_c_file} from {input_scm_file}", file=sys.stderr)
         except IOError:
             sys.stderr.write(f"Error: Could not write to output file '{output_c_file}'.\n")
             sys.exit(1)
     else:  # Output to stdout if no output file specified
         compiler.set_compile_port(sys.stdout)
-        compiler.emit_program(anf_program)
+        compiler.emit_program(parsed_program)

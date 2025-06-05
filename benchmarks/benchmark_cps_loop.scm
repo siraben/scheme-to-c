@@ -1,0 +1,5 @@
+(define (loop n k)
+  (if (= n 0)
+      (k 'done)
+      (loop (- n 1) (lambda (r) (k r)))))
+(display (loop 100000 (lambda (x) x)))
