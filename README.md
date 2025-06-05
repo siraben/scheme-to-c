@@ -21,6 +21,17 @@ Also included in this repository:
   - Includes lexical scoping and proper closures.
   - [ ] Add mutation and `define`
 
+Running tests
+-------------
+
+The test suite lives in the `tests` directory. Each Scheme file has an
+`.expected` file containing its output. To run all tests using the Python
+compiler invoke:
+
+```bash
+python3 tests/run_tests.py
+```
+
 
 Grammar of input language
 -------------------------
