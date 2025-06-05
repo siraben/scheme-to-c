@@ -70,6 +70,10 @@ reg primitive_car(reg args_list_obj);
 reg primitive_cdr(reg args_list_obj);
 reg primitive_cons(reg args_list_obj);
 reg primitive_less_than(reg args_list_obj); // Added Forward declaration
+reg primitive_numeric_equal(reg args_list_obj); // Forward declaration
+reg primitive_minus(reg args_list_obj); // Forward declaration
+reg *cons_ptr(reg *a, reg *b); // New helper
+reg *alloc_reg();
 
 reg *car(reg *head) {
   if(head->t == PAIR) {
@@ -195,6 +199,15 @@ reg *cons(reg *a, reg *b) {
   return res;
 }
 
+// Helper like cons but does not copy the car pointer (used for env to hold exact closure)
+reg *cons_ptr(reg *a, reg *b) {
+  reg *res = alloc_reg();
+  res->t = PAIR;
+  res->car = a;
+  res->cdr = b;
+  return res;
+}
+
 reg *alloc_object() {
   reg *res = 0;
   res = calloc(1, sizeof(reg));
@@ -299,6 +312,8 @@ void initialize_global_env() {
         reg* cdr_symbol = make_symbol("cdr");
         reg* cons_symbol = make_symbol("cons");
         reg* less_than_symbol = make_symbol("<"); // Added symbol
+        reg* numeric_equal_symbol = make_symbol("=");
+        reg* minus_symbol = make_symbol("-");
 
         // List of primitive procedure objects
         reg* plus_prim_obj = alloc_reg(); plus_prim_obj->t = PRIMITIVE_PROC;
@@ -328,8 +343,14 @@ void initialize_global_env() {
         reg* less_than_prim_obj = alloc_reg(); less_than_prim_obj->t = PRIMITIVE_PROC; // Added primitive object
         less_than_prim_obj->c_primitive_proc = primitive_less_than;
 
+        reg* minus_prim_obj = alloc_reg(); minus_prim_obj->t = PRIMITIVE_PROC;
+        minus_prim_obj->c_primitive_proc = primitive_minus;
+
+        reg* numeric_equal_prim_obj = alloc_reg(); numeric_equal_prim_obj->t = PRIMITIVE_PROC;
+        numeric_equal_prim_obj->c_primitive_proc = primitive_numeric_equal;
+
         #ifdef DEBUG_VM
-        printf("DEBUG: Initialized primitive objects: + (%p), zero? (%p), * (%p), sub1 (%p), null? (%p), car (%p), cdr (%p), cons (%p), < (%p)\n",
+        printf("DEBUG: Initialized primitive objects: + (%p), zero? (%p), * (%p), sub1 (%p), null? (%p), car (%p), cdr (%p), cons (%p), < (%p), = (%p), - (%p)\n",
                (void*)plus_prim_obj->c_primitive_proc,
                (void*)zero_p_prim_obj->c_primitive_proc,
                (void*)multiply_prim_obj->c_primitive_proc,
@@ -338,7 +359,9 @@ void initialize_global_env() {
                (void*)car_prim_obj->c_primitive_proc,
                (void*)cdr_prim_obj->c_primitive_proc,
                (void*)cons_prim_obj->c_primitive_proc,
-               (void*)less_than_prim_obj->c_primitive_proc); // Added to debug print
+               (void*)less_than_prim_obj->c_primitive_proc,
+               (void*)numeric_equal_prim_obj->c_primitive_proc,
+               (void*)minus_prim_obj->c_primitive_proc);
         #endif
 
         reg* nil_ptr = alloc_reg(); nil_ptr->t = NIL;
@@ -353,6 +376,8 @@ void initialize_global_env() {
         prim_symbols = cons(cdr_symbol, prim_symbols);
         prim_symbols = cons(cons_symbol, prim_symbols);
         prim_symbols = cons(less_than_symbol, prim_symbols); // Added symbol to list
+        prim_symbols = cons(numeric_equal_symbol, prim_symbols);
+        prim_symbols = cons(minus_symbol, prim_symbols);
 
         // Construct the list of values
         reg* prim_values = cons(plus_prim_obj, nil_ptr);
@@ -364,6 +389,8 @@ void initialize_global_env() {
         prim_values = cons(cdr_prim_obj, prim_values);
         prim_values = cons(cons_prim_obj, prim_values);
         prim_values = cons(less_than_prim_obj, prim_values); // Added value to list
+        prim_values = cons(numeric_equal_prim_obj, prim_values);
+        prim_values = cons(minus_prim_obj, prim_values);
 
         reg* global_frame = cons(prim_symbols, prim_values);
         env = cons(global_frame, nil_ptr);
@@ -1385,6 +1412,42 @@ reg primitive_less_than(reg args_list_obj) {
     #ifdef DEBUG_VM
     printf("DEBUG: primitive_less_than result: %s\\n", result.b ? "#t" : "#f");
     #endif
+    return result;
+}
+
+reg primitive_minus(reg args_list_obj) {
+    reg result; result.t = FIXNUM;
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) {
+        printf("ERROR: primitive '-': requires exactly two arguments\n");
+        exit(1);
+    }
+    reg arg1 = *(args_list_obj.car);
+    reg arg2 = *(args_list_obj.cdr->car);
+    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
+        printf("ERROR: primitive '-': arguments must be FIXNUMs\n");
+        exit(1);
+    }
+    result.n = arg1.n - arg2.n;
+    return result;
+}
+
+reg primitive_numeric_equal(reg args_list_obj) {
+    reg result; result.t = BOOLEAN;
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL ||
+        (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL)) {
+        printf("ERROR: primitive '=': requires exactly two arguments\n");
+        exit(1);
+    }
+    reg arg1 = *(args_list_obj.car);
+    reg arg2 = *(args_list_obj.cdr->car);
+    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
+        printf("ERROR: primitive '=': arguments must be FIXNUMs\n");
+        exit(1);
+    }
+    result.b = (arg1.n == arg2.n);
     return result;
 }
 

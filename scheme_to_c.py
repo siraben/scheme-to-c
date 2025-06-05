@@ -94,6 +94,7 @@ class SchemeToC:
         self.emit_no_colon("void write_obj(reg r);")
         self.emit_no_colon("void display_obj(reg r);")
         self.emit_no_colon("reg *cons(reg *a, reg *b);")
+        self.emit_no_colon("reg *cons_ptr(reg *a, reg *b);")
         self.emit_no_colon("reg *make_symbol(char *name);")
         self.emit_no_colon("reg *make_number(long long value);")
         self.emit_no_colon("reg *make_boolean(unsigned int value);")
@@ -158,6 +159,7 @@ class SchemeToC:
             elif op == 'boolean?': self.emit_unary_pred_generic(args[0], "eax.t == BOOLEAN")
             elif op == 'null?': self.emit_unary_pred_generic(args[0], "eax.t == NIL")
             elif op == 'eq?': self.emit_eq(args[0], args[1])
+            elif op == '=': self.emit_numeric_equal(args[0], args[1])
             elif op == '+': self.emit_binary_op_direct(args[0], args[1], '+')
             elif op == '-': self.emit_binary_op_direct(args[0], args[1], '-')
             elif op == '*': self.emit_binary_op_direct(args[0], args[1], '*')
@@ -210,6 +212,15 @@ class SchemeToC:
         self.emit("eax.t = BOOLEAN")
         self.emit("eax.b = al")
 
+    def emit_numeric_equal(self, arg1_expr, arg2_expr):
+        temp = f"tmp_{self.gensym()}"
+        self.emit_expr(arg1_expr)
+        self.emit(f"reg {temp} = eax")
+        self.emit_expr(arg2_expr)
+        self.emit(f"al = ({temp}.n == eax.n)")
+        self.emit("eax.t = BOOLEAN")
+        self.emit("eax.b = al")
+
     def emit_display(self, args_list):
         expr_to_display = args_list[0]
         self.emit_expr(expr_to_display)
@@ -246,6 +257,19 @@ class SchemeToC:
         self.emit("  reg* env_old_values = cdr(env_current_global_frame);")
         self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols);")
         self.emit("  reg* env_new_values = cons(var_val_ptr_for_env, env_old_values);")
+        self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values);")
+        self.emit("  env = cons(new_global_frame, cdr(env));")
+        self.emit_no_colon("}}")
+
+    def emit_add_var_to_global_vm_env_ptr(self, scheme_var_name, c_src_reg_ptr):
+        self.emit("// Add global variable '{}' to VM env by pointer".format(scheme_var_name))
+        self.emit_no_colon("{{")
+        self.emit("  reg* var_sym_for_env = make_symbol(\"{}\");", scheme_var_name)
+        self.emit("  reg* env_current_global_frame = car(env);")
+        self.emit("  reg* env_old_symbols = car(env_current_global_frame);")
+        self.emit("  reg* env_old_values = cdr(env_current_global_frame);")
+        self.emit("  reg* env_new_symbols = cons(var_sym_for_env, env_old_symbols);")
+        self.emit("  reg* env_new_values = cons_ptr({}, env_old_values);", c_src_reg_ptr)
         self.emit("  reg* new_global_frame = cons(env_new_symbols, env_new_values);")
         self.emit("  env = cons(new_global_frame, cdr(env));")
         self.emit_no_colon("}}")
@@ -306,7 +330,7 @@ class SchemeToC:
             
             self.emit("// 3. Add this closure (now in *{}_storage) to the global environment under its name '{}'.", c_var_name, scheme_var_name)
             self.emit("{}_c_var = *{}_storage; // Load the closure struct value into the C host var", c_var_name, c_var_name)
-            self.emit_add_var_to_global_vm_env(scheme_var_name, "{}_c_var".format(c_var_name)) # Add the C host var (by value) to env
+            self.emit_add_var_to_global_vm_env_ptr(scheme_var_name, f"{c_var_name}_storage")
             
             self.emit("// 4. CRITICAL STEP: Update the .env field of the closure in {}_storage ", c_var_name)
             self.emit("//    to point to the NEW global 'env' (which now includes the self-reference for {}).", scheme_var_name)
@@ -630,20 +654,21 @@ class SchemeToC:
             return []
 
 
-        # Scheme's `(read)` typically reads one expression.
-        # If multiple top-level expressions, they should be in a (begin ...)
-        # For simplicity, our parser will try to parse one full S-expression.
-        # If there's trailing stuff, it's an error.
+        # Parse one or more S-expressions. If more than one is present,
+        # automatically wrap them in a (begin ...).
         try:
-            parsed_expr = self._parse_sexp_from_tokens(tokens)
-            if tokens: # If tokens remain, it means there was more than one top-level S-expression without a `begin`
-                sys.stderr.write(f"Warning: Extra tokens found after parsing main S-expression in '{file_path}': {tokens}\n")
-                # Optionally, could wrap in a 'begin' or error out. For now, proceed with first parsed.
+            exprs = []
+            while tokens:
+                exprs.append(self._parse_sexp_from_tokens(tokens))
+            if len(exprs) == 1:
+                parsed_expr = exprs[0]
+            else:
+                parsed_expr = ['begin'] + exprs
         except Exception as e:
             sys.stderr.write(f"Error parsing Scheme file '{file_path}': {e}\n")
             sys.stderr.write(f"Problematic tokens might be around: {tokens[:10]}\n") # Show some context
             sys.exit(1) # Critical error, stop compilation
-            
+
         return parsed_expr
 
 # Make class methods for parser helpers static if they don't use self, or keep as is.
