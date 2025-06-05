@@ -339,7 +339,6 @@ class SchemeToC:
         expr_to_display = args_list[0]
         self.emit_expr(expr_to_display)
         self.emit("display_obj(eax)")
-        self.emit("printf(\"{}\")", "\\n")
         self.emit("fflush(stdout)")
         
     def emit_if(self, args_list):
