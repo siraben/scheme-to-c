@@ -10,6 +10,8 @@ LIBS = ["-lgc"]
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 VM_OBJECT = os.path.join(REPO_ROOT, "vm.o")
 VM_SOURCE = os.path.join(REPO_ROOT, "vm.c")
+PRIM_OBJECT = os.path.join(REPO_ROOT, "primitives.o")
+PRIM_SOURCE = os.path.join(REPO_ROOT, "primitives.c")
 NEW_COMPILER = os.path.join(REPO_ROOT, "scheme_to_c.py")
 OUTPUT_DIR = os.path.join(REPO_ROOT, "benchmarks", "output")
 OLD_COMPILER_PATH = os.path.join(OUTPUT_DIR, "scheme_to_c_prev.py")
@@ -32,6 +34,8 @@ BENCHMARKS = [
 def build_vm_object():
     if not os.path.exists(VM_OBJECT):
         subprocess.check_call([CC, *CFLAGS, "-c", VM_SOURCE, "-o", VM_OBJECT])
+    if not os.path.exists(PRIM_OBJECT):
+        subprocess.check_call([CC, *CFLAGS, "-c", PRIM_SOURCE, "-o", PRIM_OBJECT])
 
 
 def write_previous_compiler():
@@ -57,7 +61,7 @@ def compile_and_run(compiler: str, bench_base: str, suffix: str) -> float:
 
     try:
         subprocess.check_call(["python3", compiler, scm, c_file])
-        subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, *LIBS])
+        subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, PRIM_OBJECT, *LIBS])
     except subprocess.CalledProcessError:
         return float('nan')
 

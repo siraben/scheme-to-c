@@ -9,10 +9,10 @@ It reads a Scheme source file and emits C. A typical invocation is:
 ```bash
 python3 scheme_to_c.py input.scm output.c
 ```
-Then compile the generated C file together with `vm.c`:
+Then compile the generated C file together with `vm.c` and `primitives.c`:
 
 ```bash
-clang -O2 -Wall -Wextra -o program output.c vm.c -lgc
+clang -O2 -Wall -Wextra -o program output.c vm.c primitives.c -lgc
 ./program
 ```
 
