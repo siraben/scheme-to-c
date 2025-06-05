@@ -16,9 +16,6 @@ requests are welcome!
 Also included in this repository:
 
 - `scheme_to_c.py` - the Python implementation of the compiler
-- A SICP register machine language to C compiler
-  - This is in the hopes that an existing Scheme to SICP register
-    machine compiler and be used as an IR on the way to C.
 - A meta-circular evaluator for Scheme
   - Now includes tests!
   - Includes lexical scoping and proper closures.
