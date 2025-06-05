@@ -584,14 +584,14 @@ class SchemeToC:
         var_name_str = args_list[0]
         body_expr = args_list[1]
 
-        if isinstance(var_name_str, str): 
-            self.emit_expr(body_expr) 
-            # Following original scheme's emit-set-var, which is likely problematic:
-            # It assumes a C variable (var_name_str) exists and sets it.
-            # This doesn't update the Scheme 'env' if 'env' holds copies.
-            c_target_var = self.sanitize_c_identifier(var_name_str)
-            self.emit("{} = eax", c_target_var)
-            self.emit("// WARNING: set! implementation follows original, may not update Scheme environment correctly.")
+        if isinstance(var_name_str, str):
+            # Evaluate new value
+            self.emit_expr(body_expr)
+            self.emit("reg tmp_set_val = eax")
+            # Prepare parameters for runtime environment update
+            self.emit("ebx = tmp_set_val")
+            self.emit("eax = *make_symbol(\"{}\");", var_name_str)
+            self.emit("set_var_in_env(env)")
         else:
             self.emit_no_colon("// SET! target is not a symbol: {}", var_name_str)
 
