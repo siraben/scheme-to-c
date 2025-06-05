@@ -1,37 +1,38 @@
 import sys
 import re
 import io
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union
 
 class SchemeToC:
-    def __init__(self):
-        self.compile_port = sys.stdout
-        self.gensym_count = 0
-        self.anf_gensym_count = 0
-        self.lambda_free_vars = {}
-        self.lambda_struct_names = {}
-        self.nesting_level = 0
+    def __init__(self) -> None:
+        self.compile_port: TextIO = sys.stdout
+        self.gensym_count: int = 0
+        self.anf_gensym_count: int = 0
+        self.lambda_free_vars: Dict[int, List[str]] = {}
+        self.lambda_struct_names: Dict[int, str] = {}
+        self.nesting_level: int = 0
 
-    def set_compile_port(self, p):
+    def set_compile_port(self, p: TextIO) -> None:
         if not hasattr(p, 'write'):
             raise ValueError(f"Not an output port {p}")
         self.compile_port = p
 
-    def emit(self, fmt_str, *f_args):
+    def emit(self, fmt_str: str, *f_args: Any) -> None:
         s = fmt_str.format(*f_args)
         self.compile_port.write(s)
         self.compile_port.write(";")
         self.compile_port.write("\n")
 
-    def emit_no_colon(self, fmt_str, *f_args):
+    def emit_no_colon(self, fmt_str: str, *f_args: Any) -> None:
         s = fmt_str.format(*f_args)
         self.compile_port.write(s)
         self.compile_port.write("\n")
 
-    def emit_no_newline(self, fmt_str, *f_args):
+    def emit_no_newline(self, fmt_str: str, *f_args: Any) -> None:
         s = fmt_str.format(*f_args)
         self.compile_port.write(s)
         
-    def sanitize_c_identifier(self, sym_name):
+    def sanitize_c_identifier(self, sym_name: str) -> str:
         cleaned = re.sub(r'[^0-9a-zA-Z_]', '_', sym_name)
         if not re.match(r'^[A-Za-z_]', cleaned):
             cleaned = '_' + cleaned
@@ -46,10 +47,10 @@ class SchemeToC:
             cleaned = 'var_' + cleaned
         return cleaned
 
-    def is_null(self, x):
+    def is_null(self, x: Any) -> bool:
         return x == []
 
-    def is_immediate(self, x):
+    def is_immediate(self, x: Any) -> bool:
         return (
             isinstance(x, bool)
             or isinstance(x, int)
@@ -57,7 +58,7 @@ class SchemeToC:
             or (isinstance(x, tuple) and len(x) == 2 and x[0] == 'string')
         )
 
-    def emit_immediate(self, x):
+    def emit_immediate(self, x: Any) -> None:
         if isinstance(x, bool):
             self.emit("eax.t = BOOLEAN")
             if x:
@@ -73,16 +74,16 @@ class SchemeToC:
             escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
             self.emit("eax = *make_string(\"{}\");", escaped)
             
-    def gensym(self):
+    def gensym(self) -> str:
         self.gensym_count += 1
         return f"label{self.gensym_count}"
 
-    def anf_gensym(self):
+    def anf_gensym(self) -> str:
         self.anf_gensym_count += 1
         return f"anf_tmp_{self.anf_gensym_count}"
 
     # --- Closure Analysis Helpers ---
-    def _free_vars(self, expr, bound=None):
+    def _free_vars(self, expr: Any, bound: Optional[Set[str]] = None) -> Set[str]:
         if bound is None:
             bound = set()
 
@@ -176,7 +177,7 @@ class SchemeToC:
                 fvs |= self._free_vars(part, bound)
             return fvs
 
-    def _analyze_lambdas(self, expr, bound=None):
+    def _analyze_lambdas(self, expr: Any, bound: Optional[Set[str]] = None) -> None:
         if bound is None:
             bound = set()
 
@@ -207,7 +208,7 @@ class SchemeToC:
                     self._analyze_lambdas(part, bound)
 
 
-    def emit_program(self, x_expr):
+    def emit_program(self, x_expr: Any) -> None:
         self.lambda_free_vars = {}
         self.lambda_struct_names = {}
         self.nesting_level = 0
@@ -289,7 +290,7 @@ class SchemeToC:
         self.emit_expr(x_expr)
         self.emit_no_colon("}}")
 
-    def emit_expr(self, x):
+    def emit_expr(self, x: Any) -> None:
         if self.is_immediate(x):
             self.emit_immediate(x)
         elif isinstance(x, str): # This is a Scheme symbol/variable an Python string
@@ -347,17 +348,17 @@ class SchemeToC:
         else:
             self.emit("// UNHANDLED EXPRESSION TYPE in emit_expr: {}", repr(x))
 
-    def emit_unary_op_generic(self, arg_expr, c_operation):
+    def emit_unary_op_generic(self, arg_expr: Any, c_operation: str) -> None:
         self.emit_expr(arg_expr)
         self.emit(c_operation)
 
-    def emit_unary_pred_generic(self, arg_expr, c_condition):
+    def emit_unary_pred_generic(self, arg_expr: Any, c_condition: str) -> None:
         self.emit_expr(arg_expr)
         self.emit("al = ({})", c_condition)
         self.emit("eax.t = BOOLEAN")
         self.emit("eax.b = al")
 
-    def emit_binary_op_generic(self, arg1_expr, arg2_expr, c_operation_fmt):
+    def emit_binary_op_generic(self, arg1_expr: Any, arg2_expr: Any, c_operation_fmt: str) -> None:
         """Emit code for a binary operation using a temporary variable."""
         temp = f"tmp_{self.gensym()}"
         self.emit_expr(arg1_expr)
@@ -365,7 +366,7 @@ class SchemeToC:
         self.emit_expr(arg2_expr)
         self.emit(c_operation_fmt.format(temp=temp))
 
-    def emit_binary_op_direct(self, arg1_expr, arg2_expr, op_symbol):
+    def emit_binary_op_direct(self, arg1_expr: Any, arg2_expr: Any, op_symbol: str) -> None:
         """Emit code for a binary arithmetic operation without using the VM stack."""
         temp = f"tmp_{self.gensym()}"
         self.emit_expr(arg1_expr)
@@ -374,7 +375,7 @@ class SchemeToC:
         self.emit(f"eax.n = {temp}.n {op_symbol} eax.n")
         self.emit("eax.t = FIXNUM")
 
-    def emit_eq(self, arg1_expr, arg2_expr):
+    def emit_eq(self, arg1_expr: Any, arg2_expr: Any) -> None:
         temp = f"tmp_{self.gensym()}"
         self.emit_expr(arg1_expr)
         self.emit(f"reg {temp} = eax")
@@ -383,7 +384,7 @@ class SchemeToC:
         self.emit("eax.t = BOOLEAN")
         self.emit("eax.b = al")
 
-    def emit_numeric_equal(self, arg1_expr, arg2_expr):
+    def emit_numeric_equal(self, arg1_expr: Any, arg2_expr: Any) -> None:
         temp = f"tmp_{self.gensym()}"
         self.emit_expr(arg1_expr)
         self.emit(f"reg {temp} = eax")
@@ -392,13 +393,13 @@ class SchemeToC:
         self.emit("eax.t = BOOLEAN")
         self.emit("eax.b = al")
 
-    def emit_display(self, args_list):
+    def emit_display(self, args_list: List[Any]) -> None:
         expr_to_display = args_list[0]
         self.emit_expr(expr_to_display)
         self.emit("display_obj(eax)")
         self.emit("fflush(stdout)")
         
-    def emit_if(self, args_list):
+    def emit_if(self, args_list: List[Any]) -> None:
         pred, conseq, alt = args_list[0], args_list[1], args_list[2]
         alt_label = self.gensym()
         end_label = self.gensym()
@@ -412,11 +413,11 @@ class SchemeToC:
         self.emit_no_colon("{}:", end_label)
         self.emit("")
 
-    def emit_begin(self, expressions_list):
+    def emit_begin(self, expressions_list: Iterable[Any]) -> None:
         for expr in expressions_list:
             self.emit_expr(expr)
             
-    def emit_add_var_to_global_vm_env(self, scheme_var_name, c_src_var_name_or_reg):
+    def emit_add_var_to_global_vm_env(self, scheme_var_name: str, c_src_var_name_or_reg: str) -> None:
         self.emit("// Add simple global variable '{}' to VM's global 'env' from C var/reg {}", scheme_var_name, c_src_var_name_or_reg)
         self.emit_no_colon("{{")
         self.emit("  reg* var_sym_for_env = make_symbol(\"{}\");", scheme_var_name)
@@ -431,7 +432,7 @@ class SchemeToC:
         self.emit("  env = cons(new_global_frame, cdr(env));")
         self.emit_no_colon("}}")
 
-    def emit_add_var_to_global_vm_env_ptr(self, scheme_var_name, c_src_reg_ptr):
+    def emit_add_var_to_global_vm_env_ptr(self, scheme_var_name: str, c_src_reg_ptr: str) -> None:
         self.emit("// Add global variable '{}' to VM env by pointer".format(scheme_var_name))
         self.emit_no_colon("{{")
         self.emit("  reg* var_sym_for_env = make_symbol(\"{}\");", scheme_var_name)
@@ -444,7 +445,7 @@ class SchemeToC:
         self.emit("  env = cons(new_global_frame, cdr(env));")
         self.emit_no_colon("}}")
 
-    def emit_define(self, args_list):
+    def emit_define(self, args_list: List[Any]) -> None:
         definition = args_list[0]
         body_expr = args_list[1]
 
@@ -460,7 +461,7 @@ class SchemeToC:
             self.emit("// Define expected (define var val) or (define (func params) body). Got:")
             self.emit("// {}", repr(args_list))
 
-    def emit_define_var(self, expr_parts):
+    def emit_define_var(self, expr_parts: List[Any]) -> None:
         var_name_str = expr_parts[0]
         val_expr = expr_parts[1]
         
@@ -529,7 +530,7 @@ class SchemeToC:
             self.emit_add_var_to_global_vm_env(scheme_var_name, "eax") 
             self.emit("// End defining simple global {}", var_name_str)
 
-    def emit_let(self, args_list):
+    def emit_let(self, args_list: List[Any]) -> None:
         var_bindings = args_list[0]
         body_expr = args_list[1]
 
@@ -543,7 +544,7 @@ class SchemeToC:
         self.nesting_level -= 1
         self.emit_no_colon("}} // End LET scope")
 
-    def emit_quote(self, x):
+    def emit_quote(self, x: Any) -> None:
         if self.is_null(x):
             self.emit("eax.t = NIL")
         elif isinstance(x, str) and not any(c in x for c in ['(', ')', ' ', '\'', '#']):
@@ -564,7 +565,7 @@ class SchemeToC:
             self.emit_no_colon("// ERROR: emit-quote cannot quote: {}", repr(x))
 
 
-    def emit_quoted_list(self, lst):
+    def emit_quoted_list(self, lst: List[Any]) -> None:
         if not lst:
             self.emit("eax.t = NIL") # Should be caught by is_null in emit_quote
             return
@@ -577,7 +578,7 @@ class SchemeToC:
         self.emit(f"eax = *cons(&{head_tmp}, &ebx)")
 
 
-    def emit_lambda_expr(self, lambda_expr):
+    def emit_lambda_expr(self, lambda_expr: List[Any]) -> None:
         params_list = lambda_expr[1]
         body_parts = lambda_expr[2:]
         actual_body_expr = body_parts[0] if len(body_parts) == 1 else ['begin'] + body_parts
@@ -623,7 +624,7 @@ class SchemeToC:
         self.emit("eax = *new_closure_ptr")
         self.emit_no_colon("}} // End LAMBDA scope")
 
-    def emit_apply(self, expr_list): 
+    def emit_apply(self, expr_list: List[Any]) -> None:
         self.emit_no_colon("{{ // Start APPLY scope")
         proc_expr = expr_list[0]
         arg_exprs = expr_list[1:]
@@ -644,7 +645,7 @@ class SchemeToC:
         self.emit(f"eax = apply_closure({proc_tmp}, {args_tmp})")
         self.emit_no_colon("}} // End APPLY scope")
 
-    def emit_set_bang(self, args_list): 
+    def emit_set_bang(self, args_list: List[Any]) -> None:
         var_name_str = args_list[0]
         body_expr = args_list[1]
 
@@ -660,7 +661,7 @@ class SchemeToC:
         else:
             self.emit_no_colon("// SET! target is not a symbol: {}", var_name_str)
 
-    def emit_cons(self, args_list):
+    def emit_cons(self, args_list: List[Any]) -> None:
         self.emit_expr(args_list[0])
         car_tmp = f"tmp_{self.gensym()}"
         self.emit(f"reg {car_tmp} = eax")
@@ -668,15 +669,15 @@ class SchemeToC:
         self.emit("ebx = eax")
         self.emit(f"eax = *cons(&{car_tmp}, &ebx)")
 
-    def emit_car(self, args_list): 
+    def emit_car(self, args_list: List[Any]) -> None:
         self.emit_expr(args_list[0])
         self.emit("eax = *car(&eax)")
 
-    def emit_cdr(self, args_list): 
+    def emit_cdr(self, args_list: List[Any]) -> None:
         self.emit_expr(args_list[0])
         self.emit("eax = *cdr(&eax)")
 
-    def emit_cond(self, clauses_list):
+    def emit_cond(self, clauses_list: List[Any]) -> None:
         end_label = self.gensym()
 
         for clause in clauses_list:
@@ -708,13 +709,13 @@ class SchemeToC:
 
         self.emit_no_colon("{}:", end_label)
 
-    def emit_label(self, label_name_str):
+    def emit_label(self, label_name_str: str) -> None:
         self.emit_no_colon("{}:", label_name_str)
 
-    def emit_goto(self, label_name_str):
+    def emit_goto(self, label_name_str: str) -> None:
         self.emit("goto {}", label_name_str)
 
-    def emit_exit(self, arg_val):
+    def emit_exit(self, arg_val: Any) -> None:
         if isinstance(arg_val, int):
             self.emit("exit({})", arg_val)
         else:
@@ -725,14 +726,16 @@ class SchemeToC:
             self.emit("exit(eax.n) // Attempting to exit with evaluated expr")
 
     # --- ANF Transformation ---
-    def _anf_atomic(self, expr):
-        return not isinstance(expr, list) or expr == [] or (isinstance(expr, list) and expr and expr[0] == 'quote')
+    def _anf_atomic(self, expr: Any) -> bool:
+        return not isinstance(expr, list) or expr == [] or (
+            isinstance(expr, list) and expr and expr[0] == 'quote'
+        )
 
-    def anf_transform(self, expr):
+    def anf_transform(self, expr: Any) -> Any:
         self.anf_gensym_count = 0
         return self._anf(expr)
 
-    def _anf(self, expr):
+    def _anf(self, expr: Any) -> Any:
         if self._anf_atomic(expr):
             return expr
 
@@ -810,7 +813,7 @@ class SchemeToC:
 
 
     # --- Parser specific methods ---
-    def _preprocess_scheme_remove_comments(self, text):
+    def _preprocess_scheme_remove_comments(self, text: str) -> str:
         lines = text.splitlines()
         processed_lines = []
         for line in lines:
@@ -818,11 +821,11 @@ class SchemeToC:
             processed_lines.append(line)
         return "\n".join(processed_lines)
 
-    def _tokenize_sexp(self, s):
+    def _tokenize_sexp(self, s: str) -> List[str]:
         s = s.replace('(', ' ( ').replace(')', ' ) ').replace("'", " ' ")
-        return [token for token in s.split() if token] # Filter out empty strings
+        return [token for token in s.split() if token]  # Filter out empty strings
 
-    def _parse_sexp_from_tokens(self, tokens): # tokens is a list
+    def _parse_sexp_from_tokens(self, tokens: List[str]) -> Any:
         if not tokens:
             raise SyntaxError('unexpected EOF in _parse_sexp_from_tokens')
         token = tokens.pop(0)
@@ -853,7 +856,7 @@ class SchemeToC:
                     return []
                 return token # Symbol as string
 
-    def parse_scheme_file(self, file_path):
+    def parse_scheme_file(self, file_path: str) -> Any:
         try:
             with open(file_path, 'r') as f:
                 raw_scheme_code = f.read()
