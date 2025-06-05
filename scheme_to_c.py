@@ -191,6 +191,8 @@ class SchemeToC:
                 self.emit_letrec(args)
             elif op == 'lambda':
                 self.emit_lambda_expr(x)
+            elif op == 'quasiquote':
+                self.emit_quasiquote(args[0])
             elif op == 'set!':
                 self.emit_set_bang(args)
             elif op == 'display':
@@ -463,6 +465,34 @@ class SchemeToC:
             # This means (quote "string") is not handled correctly if string itself is passed as str.
             self.emit_no_colon("// ERROR: emit-quote cannot quote: {}", repr(x))
 
+    def is_unquote(self, x: Any) -> bool:
+        return isinstance(x, list) and x and x[0] == 'unquote'
+
+    def is_unquote_splicing(self, x: Any) -> bool:
+        return isinstance(x, list) and x and x[0] == 'unquote-splicing'
+
+    def expand_quasiquote(self, x: Any) -> Any:
+        if self.is_unquote(x):
+            return x[1]
+        if self.is_unquote_splicing(x):
+            raise SyntaxError('unquote-splicing not in list')
+        if not isinstance(x, list):
+            return ['quote', x]
+        return self._expand_quasiquote_list(x)
+
+    def _expand_quasiquote_list(self, lst: List[Any]) -> Any:
+        if not lst:
+            return ['quote', []]
+        first, rest = lst[0], lst[1:]
+        if self.is_unquote_splicing(first):
+            return ['append', first[1], self._expand_quasiquote_list(rest)]
+        else:
+            return ['cons', self.expand_quasiquote(first), self._expand_quasiquote_list(rest)]
+
+    def emit_quasiquote(self, x: Any) -> None:
+        expanded = self.expand_quasiquote(x)
+        self.emit_expr(expanded)
+
 
     def emit_quoted_list(self, lst: List[Any]) -> None:
         if not lst:
@@ -611,16 +641,38 @@ class SchemeToC:
         return "\n".join(processed_lines)
 
     def _tokenize_sexp(self, s: str) -> List[str]:
-        s = s.replace('(', ' ( ').replace(')', ' ) ').replace("'", " ' ")
-        return [token for token in s.split() if token]  # Filter out empty strings
+        placeholder = "__UNQ_SPLICE__"
+        s = s.replace(',@', f' {placeholder} ')
+        s = (
+            s.replace('(', ' ( ')
+            .replace(')', ' ) ')
+            .replace("'", " ' ")
+            .replace('`', ' ` ')
+            .replace(',', ' , ')
+        )
+        tokens = [token for token in s.split() if token]
+        return [',@' if token == placeholder else token for token in tokens]
 
     def _parse_sexp_from_tokens(self, tokens: List[str]) -> Any:
         if not tokens:
             raise SyntaxError('unexpected EOF in _parse_sexp_from_tokens')
         token = tokens.pop(0)
         if token == "'":
-            if not tokens: raise SyntaxError("EOF after quote")
+            if not tokens:
+                raise SyntaxError("EOF after quote")
             return ['quote', self._parse_sexp_from_tokens(tokens)]
+        if token == "`":
+            if not tokens:
+                raise SyntaxError("EOF after quasiquote")
+            return ['quasiquote', self._parse_sexp_from_tokens(tokens)]
+        if token == ",":
+            if not tokens:
+                raise SyntaxError("EOF after unquote")
+            return ['unquote', self._parse_sexp_from_tokens(tokens)]
+        if token == ",@":
+            if not tokens:
+                raise SyntaxError("EOF after unquote-splicing")
+            return ['unquote-splicing', self._parse_sexp_from_tokens(tokens)]
         if token == '(':
             L = []
             if not tokens: raise SyntaxError("EOF after open paren")
