@@ -1,12 +1,13 @@
 Benchmark results (time in seconds):
 Benchmark                        Old        New
-benchmark_tail_loop         0.246641   0.188828
-benchmark_cps_fact          0.002901   0.002763
-benchmark_cps_loop          0.995932   0.657172
-benchmark_closure_calls     0.431420   0.352411
-benchmark_map               0.024277   0.024017
-benchmark_reverse           0.026334   0.011019
-benchmark_fold              0.019933   0.020019
-benchmark_fib               0.098119   0.052231
-benchmark_let_star_chain    0.001914   0.001715
-benchmark_arith             0.402753   0.277969
+benchmark_tail_loop         0.152628   0.141406
+benchmark_cps_fact          0.001909   0.003028
+benchmark_cps_loop          0.921682   0.823654
+benchmark_closure_calls     0.266057   0.247719
+benchmark_map               0.016180   0.010699
+benchmark_reverse           0.007550   0.011814
+benchmark_fold              0.008424   0.008699
+benchmark_fib               0.042728   0.055213
+benchmark_let_star_chain    0.001585   0.001166
+benchmark_arith             0.206523   0.197664
+benchmark_sudoku_solver     3.898929   4.205277

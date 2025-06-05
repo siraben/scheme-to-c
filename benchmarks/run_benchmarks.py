@@ -25,6 +25,7 @@ BENCHMARKS = [
     "benchmark_fib",
     "benchmark_let_star_chain",
     "benchmark_arith",
+    "benchmark_sudoku_solver",
 ]
 
 
