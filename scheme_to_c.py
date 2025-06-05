@@ -630,37 +630,34 @@ class SchemeToC:
 
     def emit_cond(self, clauses_list):
         end_label = self.gensym()
-        
-        for i, clause in enumerate(clauses_list):
-            if len(clause) < 1: # Clause must have at least a predicate
-                self.emit_no_colon("// ERROR: cond clause empty: {}", repr(clause))
+
+        for clause in clauses_list:
+            if not clause:
+                self.emit_no_colon("// ERROR: cond clause empty")
                 continue
 
             pred_expr = clause[0]
-            
-            if len(clause) == 1: # (pred) case, value of pred is result if true
-                 # Scheme standard: if only (predicate), result of predicate is returned.
-                 # This compiler's (emit-cond (lambda (x) (pred (car x)) (body (cadr x))))
-                 # implies it expects (pred body ...).
-                 # For (pred) only, (cadr x) would be error or nil.
-                 # Let's assume clauses are (pred body_expr). If (pred) alone, body is pred.
-                 # This is not standard. Standard is (pred => proc) or (pred exp1 exp2...)
-                 # or (else exp1 exp2...).
-                 # The original `(body (cadr x))` implies at least two elements.
-                 self.emit_no_colon("// WARNING: cond clause with only predicate not fully standard: {}", repr(clause))
-                 body_expr = pred_expr # Non-standard, but to avoid error with (cadr x) logic.
-            else:
-                body_expr = clause[1] # Takes only the first expression after predicate.
+            body_exprs = clause[1:]
 
+            if isinstance(pred_expr, str) and pred_expr == 'else':
+                for expr in body_exprs:
+                    self.emit_expr(expr)
+                self.emit("goto {}", end_label)
+                break
 
             next_clause_label = self.gensym()
 
             self.emit_expr(pred_expr)
             self.emit("if (!eax.b){{goto {};}}", next_clause_label)
-            self.emit_expr(body_expr)
+
+            if body_exprs:
+                for expr in body_exprs:
+                    self.emit_expr(expr)
+            # When no body expressions, result of predicate remains in eax
+
             self.emit("goto {}", end_label)
             self.emit_no_colon("{}:", next_clause_label)
-        
+
         self.emit_no_colon("{}:", end_label)
 
     def emit_label(self, label_name_str):
@@ -716,10 +713,12 @@ class SchemeToC:
         elif op == 'cond':
             clauses = []
             for clause in expr[1:]:
-                if len(clause) == 1:
-                    clauses.append([self._anf(clause[0])])
-                else:
-                    clauses.append([self._anf(clause[0]), self._anf(clause[1])])
+                if not isinstance(clause, list):
+                    clauses.append([self._anf(clause)])
+                    continue
+                transformed = [self._anf(clause[0])]
+                transformed.extend(self._anf(e) for e in clause[1:])
+                clauses.append(transformed)
             return ['cond'] + clauses
         else:
             args = expr[1:]
