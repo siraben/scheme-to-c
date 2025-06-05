@@ -3,11 +3,19 @@ scheme-to-c - The quest to write a Scheme->C compiler
 
 This is an experiment in compiling Scheme to C.
 
+The project now uses the Python program `scheme_to_c.py` as the compiler.
+It reads a Scheme source file and emits C. A typical invocation is:
+
+```bash
+python3 scheme_to_c.py input.scm output.c
+```
+
 *Disclaimer*: I do not have any background in writing compilers. Pull
 requests are welcome!
 
 Also included in this repository:
 
+- `scheme_to_c.py` - the Python implementation of the compiler
 - A SICP register machine language to C compiler
   - This is in the hopes that an existing Scheme to SICP register
     machine compiler and be used as an IR on the way to C.
