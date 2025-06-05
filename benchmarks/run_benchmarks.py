@@ -11,8 +11,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 VM_OBJECT = os.path.join(REPO_ROOT, "vm.o")
 VM_SOURCE = os.path.join(REPO_ROOT, "vm.c")
 NEW_COMPILER = os.path.join(REPO_ROOT, "scheme_to_c.py")
-OLD_COMPILER = os.path.join(REPO_ROOT, "benchmarks", "scheme_to_c_before.py")
 OUTPUT_DIR = os.path.join(REPO_ROOT, "benchmarks", "output")
+OLD_COMPILER_PATH = os.path.join(OUTPUT_DIR, "scheme_to_c_prev.py")
 
 BENCHMARKS = [
     "benchmark_tail_loop",
@@ -31,6 +31,22 @@ BENCHMARKS = [
 def build_vm_object():
     if not os.path.exists(VM_OBJECT):
         subprocess.check_call([CC, *CFLAGS, "-c", VM_SOURCE, "-o", VM_OBJECT])
+
+
+def write_previous_compiler():
+    """Write scheme_to_c.py from the previous commit to OLD_COMPILER_PATH."""
+    prev_commit = subprocess.check_output([
+        "git",
+        "rev-parse",
+        "HEAD^",
+    ], cwd=REPO_ROOT, text=True).strip()
+    compiler_content = subprocess.check_output([
+        "git",
+        "show",
+        f"{prev_commit}:scheme_to_c.py",
+    ], cwd=REPO_ROOT, text=True)
+    with open(OLD_COMPILER_PATH, "w") as f:
+        f.write(compiler_content)
 
 
 def compile_and_run(compiler: str, bench_base: str, suffix: str) -> float:
@@ -55,8 +71,10 @@ def main():
     build_vm_object()
 
     results = []
+    write_previous_compiler()
+
     for bench in BENCHMARKS:
-        t_old = compile_and_run(OLD_COMPILER, bench, "old")
+        t_old = compile_and_run(OLD_COMPILER_PATH, bench, "old")
         t_new = compile_and_run(NEW_COMPILER, bench, "new")
         results.append((bench, t_old, t_new))
 
@@ -64,6 +82,9 @@ def main():
     print("{:<25} {:>10} {:>10}".format("Benchmark", "Old", "New"))
     for name, old, new in results:
         print("{:<25} {:>10.6f} {:>10.6f}".format(name, old, new))
+
+    if os.path.exists(OLD_COMPILER_PATH):
+        os.remove(OLD_COMPILER_PATH)
 
 
 if __name__ == "__main__":
