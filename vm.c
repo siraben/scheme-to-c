@@ -597,6 +597,9 @@ reg apply_closure(reg closure_obj, reg args_list_obj) {
     reg* formal_params_list = closure_obj.vars; // This is a reg* pointing to a list of symbols
     reg* body_expr_ptr = closure_obj.body;     // This is a reg* pointing to the body expression
     reg* captured_env = closure_obj.env;     // This is a reg*
+    if (captured_env == NULL) {
+        captured_env = env; // Use current global environment if none captured
+    }
 
     // Arity check
     int params_count = list_length(*formal_params_list);
@@ -1135,6 +1138,9 @@ reg eval_scheme_expr(reg expr, reg* current_eval_env) {
             reg* formal_params_list = proc_obj.vars;
             reg* body_expr_ptr = proc_obj.body;
             reg* captured_env = proc_obj.env;
+            if (captured_env == NULL) {
+                captured_env = env;
+            }
 
             int params_count = list_length(*formal_params_list);
             int args_count = list_length(evaluated_args_list_obj);

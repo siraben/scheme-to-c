@@ -9,6 +9,7 @@ class SchemeToC:
         self.anf_gensym_count = 0
         self.lambda_free_vars = {}
         self.lambda_struct_names = {}
+        self.nesting_level = 0
 
     def set_compile_port(self, p):
         if not hasattr(p, 'write'):
@@ -155,6 +156,7 @@ class SchemeToC:
     def emit_program(self, x_expr):
         self.lambda_free_vars = {}
         self.lambda_struct_names = {}
+        self.nesting_level = 0
         self._analyze_lambdas(x_expr)
         self.emit_no_colon("// -- BEGIN GENERATED C PREAMBLE --")
         self.emit_no_colon("#include <stdio.h>")
@@ -412,6 +414,7 @@ class SchemeToC:
         scheme_var_name = var_name_str
 
         is_lambda_def = isinstance(val_expr, list) and val_expr and val_expr[0] == 'lambda'
+        is_top_level = (self.nesting_level == 0)
 
         if is_lambda_def:
             lambda_params = val_expr[1]
@@ -435,9 +438,10 @@ class SchemeToC:
             self.emit_expr(['quote', actual_body])
             self.emit("quoted_body_val_for_{} = eax;", c_var_name)
             
-            self.emit("// 1. Create a temporary closure that captures the CURRENT global 'env'")
-            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, env);", 
-                      c_var_name, c_var_name, c_var_name)
+            self.emit("// 1. Create a temporary closure capturing {}", 'global env' if not is_top_level else 'no environment')
+            captured_env_arg = 'env' if not is_top_level else 'NULL'
+            self.emit("reg* temp_closure_ptr_for_{} = make_closure(&quoted_params_val_for_{}, &quoted_body_val_for_{}, {});",
+                      c_var_name, c_var_name, c_var_name, captured_env_arg)
             
             self.emit("// 2. Copy this temporary closure into our dedicated storage '{}_storage'", c_var_name)
             self.emit("memcpy({}_storage, temp_closure_ptr_for_{}, sizeof(reg));", c_var_name, c_var_name)
@@ -446,12 +450,12 @@ class SchemeToC:
             self.emit("{}_c_var = *{}_storage; // Load the closure struct value into the C host var", c_var_name, c_var_name)
             self.emit_add_var_to_global_vm_env_ptr(scheme_var_name, f"{c_var_name}_storage")
             
-            self.emit("// 4. CRITICAL STEP: Update the .env field of the closure in {}_storage ", c_var_name)
-            self.emit("//    to point to the NEW global 'env' (which now includes the self-reference for {}).", scheme_var_name)
-            self.emit("{}_storage->env = env;", c_var_name)
-
-            self.emit("// Ensure the C host variable also reflects this updated env if its struct was copied earlier (optional but good practice).")
-            self.emit("{}_c_var.env = env; // Update env in the C host var too, if it's a copy", c_var_name)
+            if is_top_level:
+                self.emit("{}_storage->env = NULL;", c_var_name)
+                self.emit("{}_c_var.env = NULL;", c_var_name)
+            else:
+                self.emit("{}_storage->env = env;", c_var_name)
+                self.emit("{}_c_var.env = env;", c_var_name)
 
             self.emit("// End defining {}", var_name_str)
         else: 
@@ -475,11 +479,13 @@ class SchemeToC:
         body_expr = args_list[1]
 
         self.emit_no_colon("{{ // Start LET scope")
+        self.nesting_level += 1
         # Original 'let' binds globally within a C block, not true lexical scope. Replicating.
         for var_name_str, val_expr in var_bindings:
             self.emit_define_var([var_name_str, val_expr])
-        
+
         self.emit_expr(body_expr)
+        self.nesting_level -= 1
         self.emit_no_colon("}} // End LET scope")
 
     def emit_quote(self, x):
