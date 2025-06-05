@@ -6,6 +6,7 @@ class SchemeToC:
     def __init__(self):
         self.compile_port = sys.stdout
         self.gensym_count = 0
+        self.anf_gensym_count = 0
 
     def set_compile_port(self, p):
         if not hasattr(p, 'write'):
@@ -52,6 +53,10 @@ class SchemeToC:
     def gensym(self):
         self.gensym_count += 1
         return f"label{self.gensym_count}"
+
+    def anf_gensym(self):
+        self.anf_gensym_count += 1
+        return f"anf_tmp_{self.anf_gensym_count}"
 
     def emit_program(self, x_expr):
         self.emit_no_colon("// -- BEGIN GENERATED C PREAMBLE --")
@@ -492,6 +497,66 @@ class SchemeToC:
             self.emit_expr(arg_val) # Evaluate if it's an expr
             self.emit("exit(eax.n) // Attempting to exit with evaluated expr")
 
+    # --- ANF Transformation ---
+    def _anf_atomic(self, expr):
+        return not isinstance(expr, list) or expr == [] or (isinstance(expr, list) and expr and expr[0] == 'quote')
+
+    def anf_transform(self, expr):
+        self.anf_gensym_count = 0
+        return self._anf(expr)
+
+    def _anf(self, expr):
+        if self._anf_atomic(expr):
+            return expr
+
+        if not isinstance(expr, list):
+            return expr
+
+        op = expr[0]
+
+        if op == 'begin':
+            return ['begin'] + [self._anf(e) for e in expr[1:]]
+        elif op == 'if':
+            return ['if', self._anf(expr[1]), self._anf(expr[2]), self._anf(expr[3])]
+        elif op == 'lambda':
+            params = expr[1]
+            body = [self._anf(e) for e in expr[2:]]
+            return ['lambda', params] + body
+        elif op == 'let':
+            bindings = [[var, self._anf(val)] for var, val in expr[1]]
+            return ['let', bindings, self._anf(expr[2])]
+        elif op == 'define':
+            definition = expr[1]
+            body = self._anf(expr[2])
+            return ['define', definition, body]
+        elif op == 'set!':
+            return ['set!', expr[1], self._anf(expr[2])]
+        elif op == 'cond':
+            clauses = []
+            for clause in expr[1:]:
+                if len(clause) == 1:
+                    clauses.append([self._anf(clause[0])])
+                else:
+                    clauses.append([self._anf(clause[0]), self._anf(clause[1])])
+            return ['cond'] + clauses
+        else:
+            args = expr[1:]
+            new_args = []
+            bindings = []
+            for arg in args:
+                arg_t = self._anf(arg)
+                if self._anf_atomic(arg_t):
+                    new_args.append(arg_t)
+                else:
+                    tmp = self.anf_gensym()
+                    bindings.append([tmp, arg_t])
+                    new_args.append(tmp)
+            core = [op] + new_args
+            if not bindings:
+                return core
+            else:
+                return ['let', bindings, core]
+
 
     # --- Parser specific methods ---
     def _preprocess_scheme_remove_comments(self, text):
@@ -592,17 +657,18 @@ if __name__ == '__main__':
     input_scm_file = sys.argv[1]
     compiler = SchemeToC()
     parsed_program = compiler.parse_scheme_file(input_scm_file)
+    anf_program = compiler.anf_transform(parsed_program)
 
     if len(sys.argv) >= 3:
         output_c_file = sys.argv[2]
         try:
             with open(output_c_file, 'w') as f_out:
                 compiler.set_compile_port(f_out)
-                compiler.emit_program(parsed_program)
+                compiler.emit_program(anf_program)
             print(f"Python compiler: Generated {output_c_file} from {input_scm_file}", file=sys.stderr)
         except IOError:
             sys.stderr.write(f"Error: Could not write to output file '{output_c_file}'.\n")
             sys.exit(1)
-    else: # Output to stdout if no output file specified
+    else:  # Output to stdout if no output file specified
         compiler.set_compile_port(sys.stdout)
-        compiler.emit_program(parsed_program) 
+        compiler.emit_program(anf_program)
