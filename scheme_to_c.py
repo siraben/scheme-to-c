@@ -50,7 +50,12 @@ class SchemeToC:
         return x == []
 
     def is_immediate(self, x):
-        return isinstance(x, bool) or isinstance(x, int) or self.is_null(x)
+        return (
+            isinstance(x, bool)
+            or isinstance(x, int)
+            or self.is_null(x)
+            or (isinstance(x, tuple) and len(x) == 2 and x[0] == 'string')
+        )
 
     def emit_immediate(self, x):
         if isinstance(x, bool):
@@ -64,6 +69,9 @@ class SchemeToC:
             self.emit("eax.n = {}", x)
         elif self.is_null(x):
             self.emit("eax.t = NIL")
+        elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
+            escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
+            self.emit("eax = *make_string(\"{}\");", escaped)
             
     def gensym(self):
         self.gensym_count += 1
@@ -538,13 +546,15 @@ class SchemeToC:
     def emit_quote(self, x):
         if self.is_null(x):
             self.emit("eax.t = NIL")
-        elif isinstance(x, str) and not any(c in x for c in ['(', ')', ' ', '\'', '#']): # Heuristic: is it a simple symbol name?
-            # This path is for symbols:
-            escaped_x_for_symbol = x.replace('\\', '\\\\').replace('"', '\\"') 
+        elif isinstance(x, str) and not any(c in x for c in ['(', ')', ' ', '\'', '#']):
+            escaped_x_for_symbol = x.replace('\\', '\\\\').replace('"', '\\"')
             self.emit("eax = *make_symbol(\"{}\");", escaped_x_for_symbol)
-        elif isinstance(x, str): # Assumed to be a symbol name
-            escaped_str = x.replace('\\', '\\\\').replace('"', '\\"') 
+        elif isinstance(x, str):
+            escaped_str = x.replace('\\', '\\\\').replace('"', '\\"')
             self.emit("eax = *make_symbol(\"{}\");", escaped_str)
+        elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
+            escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
+            self.emit("eax = *make_string(\"{}\");", escaped)
         elif isinstance(x, list) and x: 
             self.emit_quoted_list(x)
         elif self.is_immediate(x) and not self.is_null(x):
@@ -834,9 +844,10 @@ class SchemeToC:
             except ValueError:
                 if token == '#t': return True
                 if token == '#f': return False
-                # String literals "foo" are returned as Python string "foo" (content)
+                # String literals "foo"
                 if token.startswith('"') and token.endswith('"') and len(token) >=2:
-                    return token[1:-1].replace('\\"', '"').replace('\\n','\n').replace('\\t','\t') # Handle basic escapes
+                    content = token[1:-1].replace('\\"', '"').replace('\\n','\n').replace('\\t','\t')
+                    return ('string', content)
                 # Handle '() as nil/empty list
                 if token == 'nil': # Guile's `read` may not produce 'nil' often for '()
                     return []

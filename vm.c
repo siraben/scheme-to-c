@@ -184,7 +184,6 @@ void display_obj(reg r) {
 
     display_obj(*car(head)); // Recursive call to display_obj
     if (cdr(head)->t != NIL) {
-      printf(" ");
       head = cdr(head);
       if (head->t != PAIR) {
         printf(" . ");
@@ -192,6 +191,7 @@ void display_obj(reg r) {
         printf(")");
         return;
       }
+      printf(" ");
       goto print_pair_display;
     }
     printf(")");
@@ -737,6 +737,11 @@ reg apply_closure(reg closure_obj, reg args_list_obj) {
     printf("DEBUG: Closure object: "); write_obj(closure_obj); puts("");
     printf("DEBUG: Arguments list: "); write_obj(args_list_obj); puts("");
     #endif
+
+    // Allow calling primitive procedures directly through this function
+    if (closure_obj.t == PRIMITIVE_PROC) {
+        return closure_obj.c_primitive_proc(args_list_obj);
+    }
 
     if (closure_obj.t != CLOSURE) {
         printf("ERROR: Attempted to apply non-closure object.\n");
@@ -1367,33 +1372,27 @@ reg primitive_plus(reg args_list_obj) {
     #ifdef DEBUG_VM
     printf("DEBUG: primitive_plus called with args: "); write_obj(args_list_obj); puts("");
     #endif
-    reg result;
-    result.t = FIXNUM;
+    reg result; result.t = FIXNUM; result.n = 0;
 
-    if (args_list_obj.t != PAIR || args_list_obj.car == NULL) {
-        printf("ERROR: primitive '+': requires at least one argument\n");
-        exit(1);
-    }
-    reg arg1 = *(args_list_obj.car);
-
-    if (args_list_obj.cdr == NULL || args_list_obj.cdr->t != PAIR || args_list_obj.cdr->car == NULL) {
-        printf("ERROR: primitive '+': requires at least two arguments\n");
-        exit(1);
-    }
-    reg arg2 = *(args_list_obj.cdr->car);
-
-    // Check for more arguments (variadic + not yet supported, expect exactly two for now)
-    if (args_list_obj.cdr->cdr != NULL && args_list_obj.cdr->cdr->t != NIL) {
-        printf("ERROR: primitive '+': only supports two arguments for now\n");
-        exit(1);
+    reg *cur = &args_list_obj;
+    if (cur->t == NIL) {
+        return result; // sum of zero numbers is 0
     }
 
-    if (arg1.t != FIXNUM || arg2.t != FIXNUM) {
-        printf("ERROR: primitive '+': arguments must be FIXNUMs\n");
+    while (cur->t == PAIR) {
+        if (cur->car == NULL || cur->car->t != FIXNUM) {
+            printf("ERROR: primitive '+': arguments must be FIXNUMs\n");
+            exit(1);
+        }
+        result.n += cur->car->n;
+        cur = cur->cdr;
+    }
+
+    if (cur->t != NIL) {
+        printf("ERROR: primitive '+': improper argument list\n");
         exit(1);
     }
 
-    result.n = arg1.n + arg2.n;
     #ifdef DEBUG_VM
     printf("DEBUG: primitive_plus result: %lld\n", result.n);
     #endif
