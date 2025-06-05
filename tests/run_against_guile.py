@@ -12,10 +12,14 @@ LIBS = ["-lgc"]
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 VM_OBJECT = os.path.join(REPO_ROOT, "vm.o")
 VM_SOURCE = os.path.join(REPO_ROOT, "vm.c")
+PRIM_OBJECT = os.path.join(REPO_ROOT, "primitives.o")
+PRIM_SOURCE = os.path.join(REPO_ROOT, "primitives.c")
 
 def build_vm_object():
     if not os.path.exists(VM_OBJECT):
         subprocess.check_call([CC, *CFLAGS, "-c", VM_SOURCE, "-o", VM_OBJECT])
+    if not os.path.exists(PRIM_OBJECT):
+        subprocess.check_call([CC, *CFLAGS, "-c", PRIM_SOURCE, "-o", PRIM_OBJECT])
 
 def run_test(base_name):
     scm = os.path.join(REPO_ROOT, "tests", f"test_{base_name}.scm")
@@ -26,7 +30,7 @@ def run_test(base_name):
 
     # compile Scheme to C and then to native code
     subprocess.check_call(["python3", os.path.join(REPO_ROOT, "scheme_to_c.py"), scm, c_file])
-    subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, *LIBS])
+    subprocess.check_call([CC, *CFLAGS, "-o", exe_file, c_file, VM_OBJECT, PRIM_OBJECT, *LIBS])
 
     result = subprocess.run([exe_file], capture_output=True, text=True)
     actual = "".join(line.rstrip("\r\n") for line in result.stdout.splitlines())
