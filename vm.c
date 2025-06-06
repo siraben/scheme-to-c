@@ -12,7 +12,7 @@ int reg_equal(reg a, reg b) {
     case FIXNUM: return a.n == b.n;
     case CHAR: return a.c == b.c;
     case NIL: return 1;
-    case SYMBOL: return strncmp(a.s, b.s, MAX_SYMBOL_LEN - 1) == 0;
+    case SYMBOL: return strcmp(a.s, b.s) == 0;
     default: return 0;
   }
 }
@@ -178,7 +178,7 @@ reg *make_symbol(char *name) {
   reg *res;
   res = alloc_reg();
   res->t = SYMBOL;
-  res->s = strndup(name, MAX_SYMBOL_LEN);
+  res->s = strdup(name);
   return res;
 }
 
@@ -202,7 +202,7 @@ reg *make_string(char *name) {
   reg *res;
   res = alloc_reg();
   res->t = STRING;
-  res->s = strndup(name, MAX_SYMBOL_LEN);
+  res->s = strdup(name);
   return res;
 }
 
@@ -448,7 +448,7 @@ int is_symbol_eq(reg symbol_reg, const char* c_name) {
     if (symbol_reg.s == NULL || c_name == NULL) {
         return 0; // Should not happen with valid symbols/names
     }
-    return strncmp(symbol_reg.s, c_name, MAX_SYMBOL_LEN) == 0;
+    return strcmp(symbol_reg.s, c_name) == 0;
 }
 
 reg eval_scheme_expr(reg expr, reg* current_eval_env) {

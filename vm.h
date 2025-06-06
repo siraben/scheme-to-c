@@ -10,8 +10,6 @@
 #define strdup(a) GC_STRDUP(a)
 #define strndup(a,b) GC_strndup(a,b)
 
-#define MAX_SYMBOL_LEN 32
-
 typedef enum type {
     FIXNUM,
     CHAR,

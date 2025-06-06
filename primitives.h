@@ -12,6 +12,10 @@
     X(null_p, "null?") \
     X(car, "car") \
     X(cdr, "cdr") \
+    X(cadr, "cadr") \
+    X(caddr, "caddr") \
+    X(cadddr, "cadddr") \
+    X(cddr, "cddr") \
     X(cons, "cons") \
     X(less_than, "<") \
     X(numeric_equal, "=") \
@@ -22,14 +26,18 @@
     X(greater_equal, ">=") \
     X(less_equal, "<=") \
     X(eqv, "eqv?") \
+    X(eq, "eq?") \
     X(boolean_p, "boolean?") \
+    X(not, "not") \
     X(symbol_p, "symbol?") \
     X(procedure_p, "procedure?") \
     X(pair_p, "pair?") \
     X(number_p, "number?") \
+    X(integer_p, "integer?") \
     X(set_car, "set-car!") \
     X(set_cdr, "set-cdr!") \
     X(list, "list") \
+    X(map, "map") \
     X(apply_proc, "apply") \
     X(string_p, "string?") \
     X(symbol_to_string, "symbol->string") \
@@ -49,6 +57,8 @@
     X(char_greater, "char>?") \
     X(char_less_equal, "char<=?") \
     X(char_greater_equal, "char>=?") \
+    X(char_alphabetic_p, "char-alphabetic?") \
+    X(char_numeric_p, "char-numeric?") \
     X(string_equal, "string=?") \
     X(string_less, "string<?") \
     X(string_greater, "string>?") \
@@ -60,7 +70,10 @@
     X(list_to_string, "list->string") \
     X(substring, "substring") \
     X(string_copy, "string-copy") \
-    X(string_fill, "string-fill!")
+    X(string_fill, "string-fill!") \
+    X(newline, "newline") \
+    X(for_each, "for-each") \
+    X(and, "and")
 
 // Prototype declarations for primitives
 #define X(name, str) reg primitive_##name(reg args_list_obj);

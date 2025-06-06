@@ -57,6 +57,7 @@ class SchemeToC:
             or isinstance(x, int)
             or self.is_null(x)
             or (isinstance(x, tuple) and len(x) == 2 and x[0] == 'string')
+            or (isinstance(x, tuple) and len(x) == 2 and x[0] == 'char')
         )
 
     def emit_immediate(self, x: Any) -> None:
@@ -74,6 +75,16 @@ class SchemeToC:
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
             escaped = self._escape_c_string(x[1])
             self.emit("eax = *make_string(\"{}\")", escaped)
+        elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'char':
+            if x[1] == '\'':
+                self.emit("eax.t = CHAR")
+                self.emit("eax.c = '\\''")
+            elif x[1] == '\\':
+                self.emit("eax.t = CHAR")
+                self.emit("eax.c = '\\\\'")
+            else:
+                self.emit("eax.t = CHAR")
+                self.emit("eax.c = '{}'", x[1])
             
     def gensym(self) -> str:
         self.gensym_count += 1
@@ -267,8 +278,8 @@ class SchemeToC:
                 val_expr = value_parts[0] if len(value_parts) == 1 else ['begin'] + value_parts
             bindings.append([name, val_expr])
 
-        let_bindings = bindings
-        expr = ['let', let_bindings, *rest]
+        letrec_bindings = bindings
+        expr = ['letrec', letrec_bindings, *rest]
         return [expr]
 
 
@@ -283,7 +294,6 @@ class SchemeToC:
         self.emit_no_colon("#include <string.h>")
         self.emit_no_colon("#include <gc/gc.h>")
         self.emit_no_colon("")
-        self.emit_no_colon("#define MAX_SYMBOL_LEN 32")
         self.emit_no_colon("")
         self.emit_no_colon("struct reg; // Forward declaration for function pointer in reg union")
         self.emit_no_colon("")
@@ -600,6 +610,8 @@ class SchemeToC:
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
             escaped = self._escape_c_string(x[1])
             self.emit("eax = *make_string(\"{}\")", escaped)
+        elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'char':
+            self.emit_immediate(x)
         elif isinstance(x, list) and x: 
             self.emit_quoted_list(x)
         elif self.is_immediate(x) and not self.is_null(x):
@@ -776,12 +788,35 @@ class SchemeToC:
 
     # --- Parser specific methods ---
     def _preprocess_scheme_remove_comments(self, text: str) -> str:
-        lines = text.splitlines()
-        processed_lines = []
-        for line in lines:
-            line = line.split(';', 1)[0] 
-            processed_lines.append(line)
-        return "\n".join(processed_lines)
+        result = ""
+        i = 0
+        in_string = False
+        escape_next = False
+        
+        while i < len(text):
+            ch = text[i]
+            
+            if escape_next:
+                result += ch
+                escape_next = False
+            elif ch == '\\' and in_string:
+                result += ch
+                escape_next = True
+            elif ch == '"':
+                result += ch
+                in_string = not in_string
+            elif ch == ';' and not in_string:
+                # Found a comment outside of a string, skip to end of line
+                while i < len(text) and text[i] != '\n':
+                    i += 1
+                # Don't increment i here, let the main loop handle the newline
+                continue
+            else:
+                result += ch
+            
+            i += 1
+        
+        return result
 
     def _tokenize_sexp(self, s: str) -> List[str]:
         placeholder = "__UNQ_SPLICE__"
@@ -862,6 +897,16 @@ class SchemeToC:
             except ValueError:
                 if token == '#t': return True
                 if token == '#f': return False
+                # Character literals #\x
+                if token.startswith('#\\') and len(token) == 3:
+                    return ('char', token[2])
+                # Special character literals
+                if token == '#\\space':
+                    return ('char', ' ')
+                if token == '#\\newline':
+                    return ('char', '\n')
+                if token == '#\\tab':
+                    return ('char', '\t')
                 # String literals "foo"
                 if token.startswith('"') and token.endswith('"') and len(token) >= 2:
                     content = self._unescape_scheme_string(token[1:-1])

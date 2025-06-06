@@ -184,6 +184,48 @@ reg primitive_cdr(reg args_list_obj) {
     return *(pair_arg.cdr);
 }
 
+reg primitive_cadr(reg args_list_obj) {
+    reg pair_arg = expect_single_arg(args_list_obj, "cadr", PAIR);
+    if (pair_arg.cdr == NULL || pair_arg.cdr->t != PAIR || pair_arg.cdr->car == NULL) {
+        printf("ERROR: primitive 'cadr': invalid list structure\n");
+        exit(1);
+    }
+    return *(pair_arg.cdr->car);
+}
+
+reg primitive_caddr(reg args_list_obj) {
+    reg pair_arg = expect_single_arg(args_list_obj, "caddr", PAIR);
+    if (pair_arg.cdr == NULL || pair_arg.cdr->t != PAIR || 
+        pair_arg.cdr->cdr == NULL || pair_arg.cdr->cdr->t != PAIR || 
+        pair_arg.cdr->cdr->car == NULL) {
+        printf("ERROR: primitive 'caddr': invalid list structure\n");
+        exit(1);
+    }
+    return *(pair_arg.cdr->cdr->car);
+}
+
+reg primitive_cadddr(reg args_list_obj) {
+    reg pair_arg = expect_single_arg(args_list_obj, "cadddr", PAIR);
+    if (pair_arg.cdr == NULL || pair_arg.cdr->t != PAIR || 
+        pair_arg.cdr->cdr == NULL || pair_arg.cdr->cdr->t != PAIR || 
+        pair_arg.cdr->cdr->cdr == NULL || pair_arg.cdr->cdr->cdr->t != PAIR ||
+        pair_arg.cdr->cdr->cdr->car == NULL) {
+        printf("ERROR: primitive 'cadddr': invalid list structure\n");
+        exit(1);
+    }
+    return *(pair_arg.cdr->cdr->cdr->car);
+}
+
+reg primitive_cddr(reg args_list_obj) {
+    reg pair_arg = expect_single_arg(args_list_obj, "cddr", PAIR);
+    if (pair_arg.cdr == NULL || pair_arg.cdr->t != PAIR || 
+        pair_arg.cdr->cdr == NULL) {
+        printf("ERROR: primitive 'cddr': invalid list structure\n");
+        exit(1);
+    }
+    return *(pair_arg.cdr->cdr);
+}
+
 reg primitive_cons(reg args_list_obj) {
     #ifdef DEBUG_VM
     printf("DEBUG: primitive_cons called with args: "); write_obj(args_list_obj); puts("");
@@ -292,10 +334,26 @@ reg primitive_eqv(reg args_list_obj) {
     return result;
 }
 
+reg primitive_eq(reg args_list_obj) {
+    reg result; result.t = BOOLEAN;
+    reg a1, a2;
+    expect_two_args(args_list_obj, "eq?", TYPE_ANY, TYPE_ANY, &a1, &a2);
+    result.b = reg_equal(a1, a2);
+    return result;
+}
+
 reg primitive_boolean_p(reg args_list_obj) {
     reg result; result.t = BOOLEAN;
     reg arg = expect_single_arg(args_list_obj, "boolean?", TYPE_ANY);
     result.b = (arg.t == BOOLEAN);
+    return result;
+}
+
+reg primitive_not(reg args_list_obj) {
+    reg result; result.t = BOOLEAN;
+    reg arg = expect_single_arg(args_list_obj, "not", TYPE_ANY);
+    // In Scheme, only #f is false, everything else is true
+    result.b = (arg.t == BOOLEAN && arg.b == 0);
     return result;
 }
 
@@ -327,6 +385,13 @@ reg primitive_number_p(reg args_list_obj) {
     return result;
 }
 
+reg primitive_integer_p(reg args_list_obj) {
+    reg result; result.t = BOOLEAN;
+    reg arg = expect_single_arg(args_list_obj, "integer?", TYPE_ANY);
+    result.b = (arg.t == FIXNUM);
+    return result;
+}
+
 reg primitive_set_car(reg args_list_obj) {
     reg pair_reg, val_reg;
     expect_two_args(args_list_obj, "set-car!", PAIR, TYPE_ANY, &pair_reg, &val_reg);
@@ -348,6 +413,69 @@ reg primitive_list(reg args_list_obj) {
     reg *copy = alloc_reg();
     memcpy(copy, &args_list_obj, sizeof(reg));
     return *copy;
+}
+
+reg primitive_map(reg args_list_obj) {
+    reg proc, list_arg;
+    expect_two_args(args_list_obj, "map", TYPE_ANY, TYPE_ANY, &proc, &list_arg);
+    
+    if (list_arg.t == NIL) {
+        reg result; result.t = NIL; return result;
+    }
+    
+    if (list_arg.t != PAIR) {
+        printf("ERROR: map: second argument must be a list\n");
+        exit(1);
+    }
+    
+    // Build result list by applying proc to each element
+    reg *result_head = NULL;
+    reg *result_tail = NULL;
+    reg *cur = &list_arg;
+    
+    while (cur->t == PAIR) {
+        // Create argument list with single element for proc
+        reg *arg_list = alloc_reg();
+        arg_list->t = PAIR;
+        arg_list->car = cur->car;
+        arg_list->cdr = alloc_reg();
+        arg_list->cdr->t = NIL;
+        
+        // Apply procedure to the element
+        reg mapped_val;
+        if (proc.t == PRIMITIVE_PROC) {
+            mapped_val = proc.c_primitive_proc(*arg_list);
+        } else if (proc.t == CLOSURE) {
+            mapped_val = apply_closure(proc, *arg_list);
+        } else {
+            printf("ERROR: map: first argument must be a procedure\n");
+            exit(1);
+        }
+        
+        // Add result to output list
+        reg *new_pair = alloc_reg();
+        new_pair->t = PAIR;
+        new_pair->car = alloc_reg();
+        memcpy(new_pair->car, &mapped_val, sizeof(reg));
+        new_pair->cdr = alloc_reg();
+        new_pair->cdr->t = NIL;
+        
+        if (!result_head) {
+            result_head = new_pair;
+        } else {
+            result_tail->cdr = new_pair;
+        }
+        result_tail = new_pair;
+        
+        cur = cur->cdr;
+    }
+    
+    if (cur->t != NIL) {
+        printf("ERROR: map: second argument must be a proper list\n");
+        exit(1);
+    }
+    
+    return *result_head;
 }
 
 reg primitive_apply_proc(reg args_list_obj) {
@@ -446,8 +574,20 @@ reg primitive_append(reg args_list_obj) {
 }
 
 reg primitive_number_to_string(reg args_list_obj) {
-    reg arg = expect_single_arg(args_list_obj, "number->string", FIXNUM);
-    char buf[32];
+    if (args_list_obj.t != PAIR || args_list_obj.car == NULL ||
+        (args_list_obj.cdr != NULL && args_list_obj.cdr->t != NIL)) {
+        printf("ERROR: primitive 'number->string': requires exactly one argument\n");
+        exit(1);
+    }
+    reg arg = *(args_list_obj.car);
+    if (arg.t != FIXNUM) {
+        printf("ERROR: primitive 'number->string': argument must be FIXNUM, got ");
+        write_obj(arg);
+        printf(" (type %d). This suggests that a symbol variable is being used where a number should be.\n", arg.t);
+        printf("This often happens when an environment ID or count variable contains a symbol instead of a number.\n");
+        exit(1);
+    }
+    char buf[128];
     snprintf(buf, sizeof(buf), "%lld", arg.n);
     reg* r = make_string(buf);
     return *r;
@@ -535,6 +675,22 @@ reg primitive_char_greater_equal(reg args_list_obj) {
     reg a, b;
     expect_two_args(args_list_obj, "char>=?", CHAR, CHAR, &a, &b);
     return make_char_comparison_result((unsigned char)a.c >= (unsigned char)b.c);
+}
+
+reg primitive_char_alphabetic_p(reg args_list_obj) {
+    reg arg = expect_single_arg(args_list_obj, "char-alphabetic?", CHAR);
+    reg result; 
+    result.t = BOOLEAN; 
+    result.b = ((arg.c >= 'a' && arg.c <= 'z') || (arg.c >= 'A' && arg.c <= 'Z'));
+    return result;
+}
+
+reg primitive_char_numeric_p(reg args_list_obj) {
+    reg arg = expect_single_arg(args_list_obj, "char-numeric?", CHAR);
+    reg result; 
+    result.t = BOOLEAN; 
+    result.b = (arg.c >= '0' && arg.c <= '9');
+    return result;
 }
 
 static reg make_string_comparison_result(int cond) { reg r; r.t = BOOLEAN; r.b = cond; return r; }
@@ -642,6 +798,91 @@ reg primitive_string_fill(reg args_list_obj) {
     size_t len = strlen(strp->s);
     for (size_t i=0; i<len; i++) strp->s[i] = ch.c;
     reg r; r.t = NIL; return r;
+}
+
+reg primitive_newline(reg args_list_obj) {
+    // newline takes no arguments
+    if (args_list_obj.t != NIL) {
+        printf("ERROR: newline: expects no arguments\n");
+        exit(1);
+    }
+    printf("\n");
+    fflush(stdout);
+    reg r; r.t = NIL; return r;
+}
+
+reg primitive_for_each(reg args_list_obj) {
+    reg proc, list_arg;
+    expect_two_args(args_list_obj, "for-each", TYPE_ANY, TYPE_ANY, &proc, &list_arg);
+    
+    if (list_arg.t == NIL) {
+        reg result; result.t = NIL; return result;
+    }
+    
+    if (list_arg.t != PAIR) {
+        printf("ERROR: for-each: second argument must be a list\n");
+        exit(1);
+    }
+    
+    // Apply proc to each element (similar to map but don't collect results)
+    reg *cur = &list_arg;
+    
+    while (cur->t == PAIR) {
+        // Create argument list with single element for proc
+        reg *arg_list = alloc_reg();
+        arg_list->t = PAIR;
+        arg_list->car = cur->car;
+        arg_list->cdr = alloc_reg();
+        arg_list->cdr->t = NIL;
+        
+        // Apply procedure to the element
+        if (proc.t == PRIMITIVE_PROC) {
+            proc.c_primitive_proc(*arg_list);
+        } else if (proc.t == CLOSURE) {
+            apply_closure(proc, *arg_list);
+        } else {
+            printf("ERROR: for-each: first argument must be a procedure\n");
+            exit(1);
+        }
+        
+        cur = cur->cdr;
+    }
+    
+    if (cur->t != NIL) {
+        printf("ERROR: for-each: second argument must be a proper list\n");
+        exit(1);
+    }
+    
+    // for-each returns unspecified value (we'll use NIL)
+    reg result; result.t = NIL; return result;
+}
+
+reg primitive_and(reg args_list_obj) {
+    // and returns the last truthy value, or #f if any value is #f
+    reg *cur = &args_list_obj;
+    reg last_val;
+    last_val.t = BOOLEAN;
+    last_val.b = 1; // default to #t if no arguments
+    
+    while (cur->t == PAIR) {
+        reg arg = *(cur->car);
+        // In Scheme, only #f is false, everything else is true
+        if (arg.t == BOOLEAN && arg.b == 0) {
+            // Found #f, return #f immediately
+            reg result; result.t = BOOLEAN; result.b = 0;
+            return result;
+        }
+        // Keep track of the last value
+        last_val = arg;
+        cur = cur->cdr;
+    }
+    
+    if (cur->t != NIL) {
+        printf("ERROR: and: improper argument list\n");
+        exit(1);
+    }
+    
+    return last_val;
 }
 
 
