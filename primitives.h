@@ -73,7 +73,8 @@
     X(string_fill, "string-fill!") \
     X(newline, "newline") \
     X(for_each, "for-each") \
-    X(and, "and")
+    X(and, "and") \
+    X(error, "error")
 
 // Prototype declarations for primitives
 #define X(name, str) reg primitive_##name(reg args_list_obj);

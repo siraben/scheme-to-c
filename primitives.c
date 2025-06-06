@@ -811,6 +811,21 @@ reg primitive_newline(reg args_list_obj) {
     reg r; r.t = NIL; return r;
 }
 
+reg primitive_error(reg args_list_obj) {
+    // Error takes a message and prints it, then exits
+    if (args_list_obj.t != NIL) {
+        printf("Error: ");
+        display_obj(*(args_list_obj.car));
+        printf("\n");
+    } else {
+        printf("Error occurred\n");
+    }
+    exit(1);
+    reg result; // Never reached
+    result.t = NIL;
+    return result;
+}
+
 reg primitive_for_each(reg args_list_obj) {
     reg proc, list_arg;
     expect_two_args(args_list_obj, "for-each", TYPE_ANY, TYPE_ANY, &proc, &list_arg);
