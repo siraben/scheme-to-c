@@ -1,4 +1,5 @@
 import sys
+import codecs
 from typing import Any, Dict, Iterable, List, Optional, TextIO
 
 class SchemeToC:
@@ -37,6 +38,19 @@ class SchemeToC:
     def is_null(self, x: Any) -> bool:
         return x == []
 
+    def _escape_c_string(self, s: str) -> str:
+        """Escape characters for inclusion in a C string literal."""
+        return (
+            s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\t", "\\t")
+        )
+
+    def _unescape_scheme_string(self, s: str) -> str:
+        """Interpret escape sequences inside a Scheme string."""
+        return codecs.decode(s, "unicode_escape")
+
     def is_immediate(self, x: Any) -> bool:
         return (
             isinstance(x, bool)
@@ -58,7 +72,7 @@ class SchemeToC:
         elif self.is_null(x):
             self.emit("eax.t = NIL")
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
-            escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
+            escaped = self._escape_c_string(x[1])
             self.emit("eax = *make_string(\"{}\")", escaped)
             
     def gensym(self) -> str:
@@ -584,7 +598,7 @@ class SchemeToC:
             escaped_str = x.replace('\\', '\\\\').replace('"', '\\"')
             self.emit("eax = *make_symbol(\"{}\")", escaped_str)
         elif isinstance(x, tuple) and len(x) == 2 and x[0] == 'string':
-            escaped = x[1].replace('\\', '\\\\').replace('"', '\\"')
+            escaped = self._escape_c_string(x[1])
             self.emit("eax = *make_string(\"{}\")", escaped)
         elif isinstance(x, list) and x: 
             self.emit_quoted_list(x)
@@ -772,14 +786,45 @@ class SchemeToC:
     def _tokenize_sexp(self, s: str) -> List[str]:
         placeholder = "__UNQ_SPLICE__"
         s = s.replace(',@', f' {placeholder} ')
-        s = (
-            s.replace('(', ' ( ')
-            .replace(')', ' ) ')
-            .replace("'", " ' ")
-            .replace('`', ' ` ')
-            .replace(',', ' , ')
-        )
-        tokens = [token for token in s.split() if token]
+        tokens: List[str] = []
+        i = 0
+        while i < len(s):
+            ch = s[i]
+            if ch.isspace():
+                i += 1
+                continue
+            if ch in "()'`":
+                tokens.append(ch)
+                i += 1
+                continue
+            if ch == ',':
+                tokens.append(',')
+                i += 1
+                continue
+            if ch == '"':
+                j = i + 1
+                token = '"'
+                escape = False
+                while j < len(s):
+                    c = s[j]
+                    token += c
+                    if escape:
+                        escape = False
+                    elif c == '\\':
+                        escape = True
+                    elif c == '"':
+                        break
+                    j += 1
+                else:
+                    raise SyntaxError('EOF while scanning string literal')
+                i = j + 1
+                tokens.append(token)
+                continue
+            j = i
+            while j < len(s) and not s[j].isspace() and s[j] not in "()'`,":
+                j += 1
+            tokens.append(s[i:j])
+            i = j
         return [',@' if token == placeholder else token for token in tokens]
 
     def _parse_sexp_from_tokens(self, tokens: List[str]) -> Any:
@@ -818,8 +863,8 @@ class SchemeToC:
                 if token == '#t': return True
                 if token == '#f': return False
                 # String literals "foo"
-                if token.startswith('"') and token.endswith('"') and len(token) >=2:
-                    content = token[1:-1].replace('\\"', '"').replace('\\n','\n').replace('\\t','\t')
+                if token.startswith('"') and token.endswith('"') and len(token) >= 2:
+                    content = self._unescape_scheme_string(token[1:-1])
                     return ('string', content)
                 # Handle '() as nil/empty list
                 if token == 'nil': # Guile's `read` may not produce 'nil' often for '()
